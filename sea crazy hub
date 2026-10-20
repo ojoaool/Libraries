@@ -21854,6 +21854,25 @@ function ae.Build(af)
 										[ab.ThemeTag] = { CornerRadius = "CornerRadiusWindow" },
 									}
 								),
+
+								-- Imagem de fundo (agora dentro da tabela de filhos do Frame)
+								ad("ImageLabel", {
+									Name = "CustomBackground",
+									Image = "rbxassetid://92771147780280",
+									BackgroundTransparency = 1,
+									BorderSizePixel = 0,
+									Size = UDim2.fromScale(1, 1),
+									ZIndex = 1,
+									ScaleType = Enum.ScaleType.Crop,
+									ImageTransparency = 0.15,
+								}, {
+									ad("UICorner", {
+										CornerRadius = ab.GetThemeProperty("CornerRadiusWindow") or UDim.new(0, 12),
+										[ab.ThemeTag] = { CornerRadius = "CornerRadiusWindow" },
+									}),
+								}),
+
+								-- noise (já existia)
 								ad(
 									"ImageLabel",
 									{
@@ -21906,6 +21925,7 @@ function ae.Build(af)
 end
 return ae
 end
+
 a["UI/WindowSizeAdapter"]=function()
 local aa, ab = d("UI/WindowDesign"), {}
 ab.__index = ab
