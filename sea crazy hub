@@ -21854,8 +21854,7 @@ function ae.Build(af)
 										[ab.ThemeTag] = { CornerRadius = "CornerRadiusWindow" },
 									}
 								),
-
-								-- Imagem de fundo (agora dentro da tabela de filhos do Frame)
+								-- >>> Imagem de fundo adicionada <<<
 								ad("ImageLabel", {
 									Name = "CustomBackground",
 									Image = "rbxassetid://92771147780280",
@@ -21871,8 +21870,7 @@ function ae.Build(af)
 										[ab.ThemeTag] = { CornerRadius = "CornerRadiusWindow" },
 									}),
 								}),
-
-								-- noise (já existia)
+								-- noise (original)
 								ad(
 									"ImageLabel",
 									{
