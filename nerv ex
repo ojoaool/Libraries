@@ -2110,7 +2110,6 @@ function Library:CreateWindow(opts)
 			Corner = 10,
 		}, column)
 		card.AutomaticSize = Enum.AutomaticSize.Y
-		stroke(card, COLORS.PanelBorder, 1)
 		tab.CardCount = tab.CardCount + 1
 		card.LayoutOrder = tab.CardCount
 
