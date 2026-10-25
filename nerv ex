@@ -1,23 +1,66 @@
 --[[
-	NERV - Anime Expedições | UI de Automação (versão compacta)
-	Recriação da interface em Lua (Roblox LocalScript / StarterGui).
+	NERV UI Library v1.0
+	Biblioteca de UI pra executor (Roblox). Hospede este arquivo no GitHub e use:
+
+		local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/USUARIO/REPO/main/NervLib.lua"))()
+
+		local Window = Library:CreateWindow({Title = "Meu Script", Subtitle = "v1"})
+		local Page   = Window:AddPage({Name = "Main"})
+		local Card   = Page:AddCard({Title = "FARM"})
+
+		Card:AddToggle({Title = "Auto Farm", Flag = "AutoFarm", Callback = function(on) end})
+
+	=========================== REFERÊNCIA RÁPIDA ===========================
+	Library:CreateWindow({
+		Title, Subtitle, Logo, LogoFallback, Size = Vector2, ToggleKey = Enum.KeyCode,
+		ConfigFile, Id,
+		KeySystem = {Enabled = true, Keys = {"..."}},
+	}) -> Window
+
+	Window:AddPage({Name, Icon, IconFallback, Columns = 1|2}) -> Page
+	Window:AddSettingsPage()            -- página pronta: notificações, escala, atalho, reset, unload
+	Window:Notify(title, message, kind) -- kind: "info" | "success" | "error"
+	Window:Toggle() / SetVisible(bool) / Unload() / IsUnlocked()
+	Window:RegisterKeybind(name, key, callback, flag?)  -- atalho global por código (key = KeyCode ou "F")
+	Window:UnregisterKeybind(name) / SetKeybindEnabled(name, bool) / SetKeybindKey(name, key)
+	Window:SetToggleKeybind(key)  -- tecla de mostrar/esconder a janela
+	Window:GetKeybinds()          -- id -> {Name, Key, Enabled, Custom}
+	Window:ShowKeybindViewer() / HideKeybindViewer() / ToggleKeybindViewer()   -- lista (também Ctrl+B)
+	CreateWindow({KeybindViewer = false}) desliga o Ctrl+B
+	Window.Flags                        -- tabela flag -> valor atual (e o que é salvo no arquivo)
+	Window.Changed                      -- evento (flag, value)
+
+	Page:AddTab({Name, Columns}) -> Tab  (abas no topo; opcional)
+	Page:AddCard({Title, Icon, IconFallback, Side}) -> Card  (usa uma aba padrão se não houver abas)
+	Tab:AddCard({...}) -> Card           (Side = 1/"Left" ou 2/"Right")
+	Tab:Select()
+
+	Card:AddToggle   {Title, Description, Default, Flag, Callback(on), RequiresKey, Notify}
+	Card:AddDropdown {Title, Description, Options, Default (valor ou índice), Flag, Callback(value, index)}
+	Card:AddSlider   {Title, Description, Min, Max, Default, Step, Suffix, Flag, Callback(value, committed)}
+	Card:AddKeybind  {Title, Description, Default = Enum.KeyCode, Flag, Callback(), OnChanged(keyCode)}
+	                 Callback = roda ao APERTAR a tecla | OnChanged = roda quando o usuário TROCA a tecla
+	                 retorno: Get() / Set(key, silent) / SetEnabled(bool) / IsEnabled()
+	Card:AddTextbox  {Title, Description, Placeholder, ButtonText, Callback(text)}
+	Card:AddButton   {Title, Description, ButtonText, Danger, Callback()}
+	Card:AddLabel    {Text, Bold, Muted, Color, Height} -> {SetText, SetColor}
+	Card:AddKeyInput {Title, Description, Placeholder, ButtonText, Callback(valid)}
+	Card:AddSeparator()
+
+	Ícones aceitam: "rbxassetid://123", número, ou "gh:caminho/no/repo.png" (baixa do GitHub).
 ]]
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
-local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local env = (getgenv and getgenv()) or _G
 
 -- ================== PALETA ==================
--- Tema preto e branco: o "Accent" (antes azul) virou branco puro — numa UI já
--- escura, o destaque precisa de brilho pra não sumir; um preto não teria contraste
--- nenhum contra o fundo. Os preenchimentos que eram um azul-marinho (item ativo
--- da sidebar, opção selecionada do dropdown) viraram um cinza-chumbo neutro —
--- aí sim "o azul trocado por um preto que combina".
+-- Dá pra sobrescrever antes do CreateWindow: Library.Colors.Accent = Color3.fromRGB(...)
 local COLORS = {
 	Background   = Color3.fromRGB(15, 17, 23),
 	Panel        = Color3.fromRGB(20, 23, 31),
@@ -25,7 +68,9 @@ local COLORS = {
 	Sidebar      = Color3.fromRGB(12, 14, 19),
 	Card         = Color3.fromRGB(24, 27, 36),
 	CardHeader   = Color3.fromRGB(140, 148, 165),
+	CardHeaderBg = Color3.fromRGB(17, 20, 27),
 	Field        = Color3.fromRGB(18, 20, 28),
+	FieldHover   = Color3.fromRGB(28, 31, 41),
 	TextPrimary  = Color3.fromRGB(235, 236, 240),
 	TextMuted    = Color3.fromRGB(140, 145, 160),
 	Accent       = Color3.fromRGB(255, 255, 255),
@@ -34,59 +79,143 @@ local COLORS = {
 	ToggleOn     = Color3.fromRGB(255, 255, 255),
 	Knob         = Color3.fromRGB(240, 240, 245),
 	Divider      = Color3.fromRGB(38, 41, 52),
-	CardHeaderBg = Color3.fromRGB(17, 20, 27),
 	NavActiveBg  = Color3.fromRGB(38, 38, 42),
 	SelectedBg   = Color3.fromRGB(45, 45, 48),
+	Scroll       = Color3.fromRGB(70, 74, 90),
+	Success      = Color3.fromRGB(90, 210, 130),
+	Danger       = Color3.fromRGB(230, 90, 90),
+	DangerHover  = Color3.fromRGB(150, 50, 55),
 }
 
--- ================== CONFIG GERAL ==================
-local FADE_SPEED = 0.18
-local TOGGLE_UI_KEYCODE = Enum.KeyCode.Insert
+local Library = {
+	Version = "1.0.0",
+	Colors = COLORS,
+	CacheDir = "NervLib",
 
-local KEY_SYSTEM = {
-	Enabled = true,
-	ValidKeys = {"CURSEDBOND-FREE", "NERV-2026"},
+	-- Repositório de onde saem ícones ("gh:...") e fontes. Troque antes do CreateWindow.
+	Github = {
+		User   = "Heymanwhatsupitsgoatishere",
+		Repo   = "autumn-assets",
+		Branch = "main", -- dica: use um hash de commit pra evitar cache velho do GitHub
+	},
+
+	-- Arquivos de fonte dentro do repositório acima.
+	FontFiles = {
+		Title = {Family = "ComicSansBold", File = "nova_ComicSansBold.ttf"},
+		Body  = {Family = "ComicNeueBold", File = "ComicNeue-Bold.ttf"},
+	},
+
+	-- Ícones internos da biblioteca (rbxassetid ou "gh:...").
+	Icons = {
+		Search      = "rbxassetid://5107220207",
+		Minimize    = "rbxassetid://78357418744409",
+		Close       = "rbxassetid://4773247381",
+		ChevronDown = "rbxassetid://11552476728",
+	},
 }
 
-local contentCanvas
-local overlay
-local closeOpenDropdown
-local overlayBackgroundCatcher
-local updateActivePage -- forward declaration: definida na seção CONTENT, usada pelos cliques de nav/tab
+-- ================== GITHUB (ÍCONES + FONTES) ==================
+local function rawUrl(repoPath)
+	local g = Library.Github
+	return string.format("https://raw.githubusercontent.com/%s/%s/%s/%s", g.User, g.Repo, g.Branch, repoPath)
+end
 
--- Função nomeada: fecha o dropdown aberto (se houver) e limpa a referência.
--- Usada em qualquer lugar que "desconecte visualmente" a lista do botão que a abriu:
--- rolar o conteúdo, trocar de aba/menu, arrastar a janela, minimizar. Sem isso, a
--- lista (desenhada num overlay à parte, por cima de tudo) fica flutuando fora do
--- lugar quando o resto da UI se move e ela não.
-local function closeAnyOpenDropdown()
-	if closeOpenDropdown then
-		closeOpenDropdown()
-		closeOpenDropdown = nil
+local function ensureFolders(fullPath)
+	if not (makefolder and isfolder) then return end
+	local current = ""
+	for segment in string.gmatch(fullPath, "[^/]+") do
+		current = current == "" and segment or (current .. "/" .. segment)
+		pcall(function()
+			if not isfolder(current) then makefolder(current) end
+		end)
 	end
 end
 
--- ================== CONFIG DE ASSETS (rbxassetid) ==================
-local ASSETS = {
-	LogoIcon      = "rbxassetid://77014518780315",
-	NavAutomation = "rbxassetid://0",
-	NavSettings   = "rbxassetid://0",
-	IconStory     = "rbxassetid://0",
-	IconRaid      = "rbxassetid://0",
-	IconChallenge = "rbxassetid://0",
-	IconQueue     = "rbxassetid://0",
-	IconMacro     = "rbxassetid://0",
-	IconHotkeys   = "rbxassetid://0",
-	IconSearch    = "rbxassetid://5107220207",
-	IconMinimize  = "rbxassetid://78357418744409",
-	IconClose     = "rbxassetid://4773247381",
-	IconChevronDown = "rbxassetid://11552476728",
-	IconChevronUp   = "rbxassetid://0",
-	IconKeyValid    = "rbxassetid://0",
-	IconKeyInvalid  = "rbxassetid://0",
-}
+-- Baixa "icons/x.png" para workspace/<CacheDir>/icons/x.png (com cache). Retorna caminho local ou nil.
+local function downloadToCache(repoPath)
+	if not (writefile and isfile) then return nil end
+	local g = Library.Github
+	-- o cache inclui user/repo pra não misturar arquivos de repositórios diferentes
+	local localPath = string.format("%s/%s_%s/%s", Library.CacheDir, g.User, g.Repo, repoPath)
+	ensureFolders(localPath:match("^(.*)/[^/]+$") or Library.CacheDir)
 
--- ================== HELPERS ==================
+	if not isfile(localPath) then
+		local ok, data = pcall(function() return game:HttpGet(rawUrl(repoPath)) end)
+		if not ok or type(data) ~= "string" or #data == 0 or data:sub(1, 3) == "404" then
+			return nil
+		end
+		if not pcall(writefile, localPath, data) then return nil end
+	end
+	return localPath
+end
+
+-- ---------- Fontes ----------
+local FONTS = {
+	Title = Font.fromEnum(Enum.Font.GothamBold),
+	Body  = Font.fromEnum(Enum.Font.GothamMedium),
+}
+local fontsLoaded = false
+
+local function loadFont(spec, fallbackEnum)
+	local fallback = Font.fromEnum(fallbackEnum)
+	if not spec or not (getcustomasset and writefile) then return fallback end
+
+	local ttfPath = downloadToCache(spec.File)
+	if not ttfPath then return fallback end
+
+	local ok, face = pcall(function()
+		local familyPath = Library.CacheDir .. "/" .. spec.Family .. ".json"
+		writefile(familyPath, HttpService:JSONEncode({
+			name = spec.Family,
+			faces = {{
+				name = "Regular",
+				weight = 400,
+				style = "normal",
+				assetId = getcustomasset(ttfPath),
+			}},
+		}))
+		return Font.new(getcustomasset(familyPath))
+	end)
+	return ok and face or fallback
+end
+
+local function ensureFonts()
+	if fontsLoaded then return end
+	fontsLoaded = true
+	ensureFolders(Library.CacheDir)
+	FONTS.Title = loadFont(Library.FontFiles.Title, Enum.Font.GothamBold)
+	FONTS.Body  = loadFont(Library.FontFiles.Body, Enum.Font.GothamMedium)
+end
+
+-- ================== HELPERS GERAIS ==================
+local function trim(text)
+	return (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function fire(callback, ...)
+	if type(callback) ~= "function" then return end
+	local ok, err = pcall(callback, ...)
+	if not ok then
+		warn("[NervLib] erro em callback: " .. tostring(err))
+	end
+end
+
+local function findOptionIndex(options, value, fallback)
+	if value ~= nil then
+		for i, opt in ipairs(options) do
+			if opt == value then return i end
+		end
+	end
+	return fallback
+end
+
+local function keyCodeFromName(name, fallback)
+	if type(name) ~= "string" then return fallback end
+	local ok, keyCode = pcall(function() return Enum.KeyCode[name] end)
+	if ok and typeof(keyCode) == "EnumItem" then return keyCode end
+	return fallback
+end
+
 local function corner(inst, radius)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, radius or 10)
@@ -102,20 +231,6 @@ local function stroke(inst, color, thickness)
 	return s
 end
 
--- Função nomeada: aplica um brilho suave (UIShadow com Offset zerado = espalha
--- simetricamente em vez de projetar sombra pra um lado, funcionando como glow).
--- Usada nos divisores do hub pra dar aquele contorno brilhante sutil.
-local function glow(inst, color, transparency, blurRadius)
-	local g = Instance.new("UIShadow")
-	g.Color = color or Color3.fromRGB(255, 255, 255)
-	g.Transparency = transparency or 0.75
-	g.Offset = UDim2.new(0, 0, 0, 0)
-	g.Spread = UDim2.new(0, 0, 0, 0)
-	g.BlurRadius = blurRadius or UDim.new(0, 4)
-	g.Parent = inst
-	return g
-end
-
 local function newFrame(props, parent)
 	local f = Instance.new("Frame")
 	f.BackgroundColor3 = props.BackgroundColor3 or COLORS.Panel
@@ -125,12 +240,20 @@ local function newFrame(props, parent)
 	f.Position = props.Position or UDim2.new(0, 0, 0, 0)
 	f.AnchorPoint = props.AnchorPoint or Vector2.new(0, 0)
 	f.Name = props.Name or "Frame"
+	if props.Visible ~= nil then f.Visible = props.Visible end
+	if props.ClipsDescendants then f.ClipsDescendants = true end
 	f.Parent = parent
 	if props.Corner then corner(f, props.Corner) end
-	if props.Stroke then stroke(f, props.StrokeColor) end
-	if props.ClipsDescendants then f.ClipsDescendants = true end
-	if props.Glow then glow(f, props.GlowColor, props.GlowTransparency, props.GlowBlur) end
+	if props.StrokeColor then stroke(f, props.StrokeColor) end
 	return f
+end
+
+-- Regra de fontes: o que é pedido como GothamBold vira a fonte de título; o resto vira a fonte base.
+local function fontFor(requestedFont)
+	if requestedFont == Enum.Font.GothamBold then
+		return FONTS.Title
+	end
+	return FONTS.Body
 end
 
 local function newLabel(props, parent)
@@ -139,47 +262,17 @@ local function newLabel(props, parent)
 	l.Size = props.Size or UDim2.new(1, 0, 0, 20)
 	l.Position = props.Position or UDim2.new(0, 0, 0, 0)
 	l.AnchorPoint = props.AnchorPoint or Vector2.new(0, 0)
-	l.Font = props.Font or Enum.Font.GothamMedium
+	l.FontFace = fontFor(props.Font)
 	l.Text = props.Text or ""
 	l.TextColor3 = props.TextColor3 or COLORS.TextPrimary
 	l.TextSize = props.TextSize or 14
 	l.TextXAlignment = props.TextXAlignment or Enum.TextXAlignment.Left
 	l.TextYAlignment = props.TextYAlignment or Enum.TextYAlignment.Center
 	l.TextWrapped = props.TextWrapped or false
+	if props.Truncate then l.TextTruncate = Enum.TextTruncate.AtEnd end
 	l.Name = props.Name or "Label"
 	l.Parent = parent
 	return l
-end
-
-local function createIcon(props, parent)
-	local hasAsset = props.AssetId and props.AssetId ~= "" and props.AssetId ~= "rbxassetid://0"
-	local imageColor = props.ImageColor3 or COLORS.TextPrimary
-
-	if hasAsset then
-		local img = Instance.new("ImageLabel")
-		img.Name = props.Name or "Icon"
-		img.BackgroundTransparency = 1
-		img.Size = props.Size or UDim2.new(0, 20, 0, 20)
-		img.Position = props.Position or UDim2.new(0, 0, 0, 0)
-		img.AnchorPoint = props.AnchorPoint or Vector2.new(0, 0)
-		img.Image = props.AssetId
-		img.ImageColor3 = imageColor
-		img.ScaleType = Enum.ScaleType.Fit
-		img.Parent = parent
-		return img
-	end
-
-	local fallback = newLabel({
-		Name = props.Name or "IconFallback",
-		Size = props.Size or UDim2.new(0, 20, 0, 20),
-		Position = props.Position or UDim2.new(0, 0, 0, 0),
-		AnchorPoint = props.AnchorPoint,
-		Text = props.FallbackText or "•",
-		TextSize = props.TextSize or 16,
-		TextColor3 = imageColor,
-		TextXAlignment = Enum.TextXAlignment.Center,
-	}, parent)
-	return fallback
 end
 
 local function newButton(props, parent)
@@ -191,7 +284,7 @@ local function newButton(props, parent)
 	b.Size = props.Size or UDim2.new(1, 0, 0, 30)
 	b.Position = props.Position or UDim2.new(0, 0, 0, 0)
 	b.AnchorPoint = props.AnchorPoint or Vector2.new(0, 0)
-	b.Font = props.Font or Enum.Font.Gotham
+	b.FontFace = fontFor(props.Font)
 	b.Text = props.Text or ""
 	b.TextColor3 = props.TextColor3 or COLORS.TextPrimary
 	b.TextSize = props.TextSize or 14
@@ -201,1828 +294,2421 @@ local function newButton(props, parent)
 	return b
 end
 
-local function fadeSwitch(canvasGroup, onMidpoint)
-	local halfSpeed = FADE_SPEED / 2
+-- ---------- Ícones ----------
+-- Aceita número, "rbxassetid://..." ou "gh:caminho". Sem asset (ou falha no download) => texto/emoji.
+local assetCache = {}
 
-	local fadeOutTween = TweenService:Create(
-		canvasGroup,
-		TweenInfo.new(halfSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{GroupTransparency = 1}
-	)
+local function normalizeAsset(spec)
+	if type(spec) == "number" then return "rbxassetid://" .. spec end
+	if type(spec) == "string" and spec ~= "" then
+		if tonumber(spec) then return "rbxassetid://" .. spec end
+		return spec
+	end
+	return nil
+end
 
-	local function onFadeOutFinished()
-		if onMidpoint then
-			onMidpoint()
+local function resolveGithubAsset(repoPath)
+	if assetCache[repoPath] then return assetCache[repoPath] end
+	local path = downloadToCache(repoPath)
+	if path and getcustomasset then
+		local ok, asset = pcall(getcustomasset, path)
+		if ok and asset then
+			assetCache[repoPath] = asset
+			return asset
 		end
+	end
+	return nil
+end
 
-		local fadeInTween = TweenService:Create(
-			canvasGroup,
-			TweenInfo.new(halfSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{GroupTransparency = 0}
-		)
-		fadeInTween:Play()
+local function createIcon(props, parent)
+	local spec = normalizeAsset(props.AssetId)
+	local color = props.ImageColor3 or COLORS.TextPrimary
+	local size = props.Size or UDim2.new(0, 20, 0, 20)
+	local position = props.Position or UDim2.new(0, 0, 0, 0)
+	local anchor = props.AnchorPoint or Vector2.new(0, 0)
+
+	if spec and spec ~= "rbxassetid://0" then
+		local img = Instance.new("ImageLabel")
+		img.Name = props.Name or "Icon"
+		img.BackgroundTransparency = 1
+		img.Size = size
+		img.Position = position
+		img.AnchorPoint = anchor
+		img.ImageColor3 = color
+		img.ScaleType = Enum.ScaleType.Fit
+		img.Parent = parent
+
+		local fallback = newLabel({
+			Name = "Fallback",
+			Size = UDim2.new(1, 0, 1, 0),
+			Text = props.FallbackText or "•",
+			TextSize = props.TextSize or 16,
+			TextColor3 = color,
+			TextXAlignment = Enum.TextXAlignment.Center,
+		}, img)
+
+		if spec:sub(1, 3) == "gh:" then
+			-- download assíncrono: o emoji aparece até a imagem chegar
+			task.spawn(function()
+				local asset = resolveGithubAsset(spec:sub(4))
+				if asset and img.Parent then
+					img.Image = asset
+					fallback.Visible = false
+				end
+			end)
+		else
+			img.Image = spec
+			fallback.Visible = false
+		end
+		return img
 	end
 
-	fadeOutTween.Completed:Once(onFadeOutFinished)
-	fadeOutTween:Play()
+	return newLabel({
+		Name = props.Name or "IconFallback",
+		Size = size,
+		Position = position,
+		AnchorPoint = anchor,
+		Text = props.FallbackText or "•",
+		TextSize = props.TextSize or 16,
+		TextColor3 = color,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	}, parent)
 end
 
-local rowOrder = 10
-local function nextRowOrder()
-	rowOrder = rowOrder + 1
-	return rowOrder
+local function setIconColor(icon, color)
+	if icon:IsA("ImageLabel") then
+		icon.ImageColor3 = color
+		local fallback = icon:FindFirstChild("Fallback")
+		if fallback then fallback.TextColor3 = color end
+	else
+		icon.TextColor3 = color
+	end
 end
 
-local function addRowDivider(parent)
+-- Hover suave de cor de fundo (as conexões morrem junto com o botão).
+local function addHover(btn, normalColor, hoverColor)
+	local info = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, info, {BackgroundColor3 = hoverColor}):Play()
+	end)
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, info, {BackgroundColor3 = normalColor}):Play()
+	end)
+end
+
+-- LayoutOrder por container (cada card tem sua própria contagem).
+local function nextOrder(parent)
+	local n = (parent:GetAttribute("RowCount") or 0) + 1
+	parent:SetAttribute("RowCount", n)
+	return n
+end
+
+local function addDivider(parent)
 	return newFrame({
 		Name = "RowDivider",
 		Size = UDim2.new(1, 0, 0, 1),
 		Position = UDim2.new(0, 0, 1, -1),
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-		Glow = true,
-		GlowTransparency = 0.35,
-		GlowBlur = UDim.new(0, 6),
+		BackgroundColor3 = COLORS.Divider,
 	}, parent)
 end
 
-local function createChevron(parent, size, position)
+-- Chevron do dropdown: sempre gira 180° ao abrir/fechar.
+local function createChevron(parent)
 	local icon = createIcon({
 		Name = "Chevron",
-		Size = size or UDim2.new(0, 18, 1, 0),
-		Position = position or UDim2.new(1, -22, 0, 0),
-		AssetId = ASSETS.IconChevronDown,
+		Size = UDim2.new(0, 16, 0, 16),
+		Position = UDim2.new(1, -24, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		AssetId = Library.Icons.ChevronDown,
 		FallbackText = "⌄",
 		TextSize = 13,
 		ImageColor3 = COLORS.TextMuted,
 	}, parent)
 
 	local function setOpen(isOpen)
-		if icon:IsA("ImageLabel") then
-			icon.Image = isOpen and ASSETS.IconChevronUp or ASSETS.IconChevronDown
-		else
-			icon.Text = isOpen and "⌃" or "⌄"
-		end
-		-- Mini animação: gira o chevron 180° ao abrir/fechar (funciona pra imagem e fallback)
-		TweenService:Create(
-			icon,
-			TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{Rotation = isOpen and 180 or 0}
-		):Play()
+		TweenService:Create(icon, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{Rotation = isOpen and 180 or 0}):Play()
 	end
-
 	return icon, setOpen
 end
 
--- ================== HUB STATE ==================
--- Estado central do hub: guarda o valor atual de cada dropdown/toggle pra qualquer
--- lógica de automação real ler depois (ex.: um loop de farm consultando HubState.Story.Map).
-local HubState = {
-	Story = {Map = nil, Stage = nil, Difficulty = nil, AutoJoin = false},
-	Challenge = {Type = nil, Stage = nil, AutoJoin = false},
-	Raid = {Map = nil, Act = nil, Difficulty = nil, AutoJoin = false},
-	Macro = {Speed = 1, Enabled = false},
-	KeySystem = {Unlocked = not KEY_SYSTEM.Enabled},
-}
+-- ================== JANELA ==================
+function Library:CreateWindow(opts)
+	opts = opts or {}
+	ensureFonts()
 
--- ================== PERSISTÊNCIA DE CONFIG ==================
--- Salva/carrega o HubState inteiro num arquivo JSON local (writefile/readfile,
--- padrão de executor), pra o usuário não perder a configuração toda vez que o
--- script recarrega. writefile/isfile/readfile podem não existir em todo ambiente
--- (ex.: Roblox Studio puro), por isso tudo passa por pcall.
-local CONFIG_FILE = "NervHub_Config.json"
+	local title = tostring(opts.Title or "NERV")
+	local subtitle = tostring(opts.Subtitle or "")
+	local windowId = tostring(opts.Id or title)
+	local WINDOW_W = (opts.Size and opts.Size.X) or 940
+	local WINDOW_H = (opts.Size and opts.Size.Y) or 580
+	local FADE_SPEED = 0.18
+	local MAX_TOASTS = 4
 
--- Função nomeada: lê e decodifica o JSON salvo; retorna {} se não existir ou der erro.
-local function loadConfig()
-	local ok, result = pcall(function()
-		if isfile and isfile(CONFIG_FILE) then
-			return HttpService:JSONDecode(readfile(CONFIG_FILE))
-		end
-		return {}
-	end)
-	if ok and type(result) == "table" then
-		return result
+	-- Instância única por Id: criar de novo descarrega a janela anterior.
+	env.__NervLibWindows = env.__NervLibWindows or {}
+	local previous = env.__NervLibWindows[windowId]
+	if previous and previous.Unload then
+		pcall(previous.Unload)
 	end
-	return {}
-end
+	local guiName = "NervLib_" .. windowId
+	local oldGui = playerGui:FindFirstChild(guiName)
+	if oldGui then oldGui:Destroy() end
 
--- Carregado uma única vez, antes de qualquer card ser construído, pra servir de
--- valor inicial (default) de cada dropdown/slider/toggle mais abaixo.
-local SavedConfig = loadConfig()
+	local Window = {Flags = {}, Pages = {}}
+	local changedEvent = Instance.new("BindableEvent")
+	Window.Changed = changedEvent.Event
 
-local configDirty = false
--- Função nomeada: marca que o HubState mudou; o heartbeat lá embaixo descarrega
--- isso pro disco no máximo uma vez por segundo (evita gravar a cada pixel de
--- arraste do slider, por exemplo).
-local function markConfigDirty()
-	configDirty = true
-end
+	-- ---------- Conexões / limpeza ----------
+	local connections = {}
+	local function track(connection)
+		connections[#connections + 1] = connection
+		return connection
+	end
 
--- Função nomeada: grava o HubState inteiro no disco. Chamada só pelo heartbeat
--- (debounced), nunca direto de dentro de um callback de UI.
-local function saveConfig()
+	-- Forward declarations (preenchidas mais abaixo)
+	local screenGui, mainFrame, overlay, overlayCatcher, uiScale, contentCanvas
+	local showNotification, updateActivePage, applySearch, setUiVisible, applyScale
+	local closeOpenDropdown
+	local unloaded = false
+
+	local function closeAnyOpenDropdown()
+		if closeOpenDropdown then
+			local closeFn = closeOpenDropdown
+			closeOpenDropdown = nil
+			closeFn()
+		end
+	end
+
+	-- ---------- Persistência (por flag) ----------
+	local configFile = opts.ConfigFile or ("NervLib_" .. (string.gsub(windowId, "[^%w_%-]", "_")) .. ".json")
+	local saveDisabled = false
+	local savedFlags, savedKey = {}, ""
+
 	pcall(function()
-		if writefile then
-			writefile(CONFIG_FILE, HttpService:JSONEncode(HubState))
+		if isfile and isfile(configFile) then
+			local data = HttpService:JSONDecode(readfile(configFile))
+			if type(data) == "table" then
+				if type(data.Flags) == "table" then savedFlags = data.Flags end
+				if type(data.Key) == "string" then savedKey = data.Key end
+			end
 		end
 	end)
-	configDirty = false
-end
+	Window.HadSavedConfig = next(savedFlags) ~= nil
 
--- Função nomeada: acha o índice de "value" dentro de "options"; cai no fallback
--- se não existir (ex.: a key salva não bater com nenhuma opção atual).
-local function findOptionIndex(options, value, fallback)
-	if value ~= nil then
-		for i, opt in ipairs(options) do
-			if opt == value then
-				return i
+	-- Lê um valor salvo validando o tipo (e tratando corretamente o valor `false`).
+	local function saved(flag, default)
+		if not flag then return default end
+		local v = savedFlags[flag]
+		if v == nil then return default end
+		if default ~= nil and type(v) ~= type(default) then return default end
+		return v
+	end
+
+	local keyValue = ""
+	local configDirty, saveScheduled = false, false
+
+	local function saveConfig()
+		configDirty = false
+		if saveDisabled then return end
+		pcall(function()
+			if writefile then
+				writefile(configFile, HttpService:JSONEncode({
+					Version = 1,
+					Flags = Window.Flags,
+					Key = keyValue,
+				}))
+			end
+		end)
+	end
+
+	-- Debounce por task.delay: agrupa mudanças e grava 1x por segundo.
+	local function markConfigDirty()
+		configDirty = true
+		if saveScheduled then return end
+		saveScheduled = true
+		task.delay(1, function()
+			saveScheduled = false
+			if configDirty then saveConfig() end
+		end)
+	end
+
+	-- Ponto único de "algo mudou": atualiza a flag, dispara o evento público e agenda o autosave.
+	local function setFlag(flag, value)
+		if not flag or unloaded then return end
+		Window.Flags[flag] = value
+		changedEvent:Fire(flag, value)
+		markConfigDirty()
+	end
+
+	-- Valor inicial (restaurado ou padrão), sem disparar evento.
+	local function initFlag(flag, value)
+		if flag then Window.Flags[flag] = value end
+	end
+
+	-- ---------- Key system ----------
+	local keyCfg = opts.KeySystem or {}
+	local keyEnabled = keyCfg.Enabled == true
+	local validKeys = {}
+	for _, k in ipairs(keyCfg.Keys or {}) do
+		validKeys[string.upper(trim(k))] = true
+	end
+	local function isKeyValid(text)
+		return validKeys[string.upper(trim(text))] == true
+	end
+
+	local keyUnlocked = (not keyEnabled) or isKeyValid(savedKey)
+	if keyEnabled and keyUnlocked then keyValue = savedKey end
+
+	-- Toggles com RequiresKey registram aqui um "forçar desligado".
+	local gatedToggles = {}
+
+	local function setKeyUnlocked(isValid)
+		keyUnlocked = isValid or not keyEnabled
+		if not keyUnlocked then
+			for _, forceOff in ipairs(gatedToggles) do
+				forceOff()
 			end
 		end
 	end
-	return fallback
-end
 
--- Função nomeada: lê um valor salvo (SavedConfig.Grupo.Campo) com fallback seguro
--- quando o grupo ainda não existe no arquivo (primeira vez rodando o script).
-local function savedOrDefault(group, field, fallback)
-	local groupTable = SavedConfig[group]
-	if groupTable and groupTable[field] ~= nil then
-		return groupTable[field]
-	end
-	return fallback
-end
-
--- ================== COMPONENTES: OVERLAY ==================
-local function createOverlay(parent)
-	local ov = Instance.new("Frame")
-	ov.Name = "DropdownOverlay"
-	ov.BackgroundTransparency = 1
-	ov.Size = UDim2.new(1, 0, 1, 0)
-	ov.Position = UDim2.new(0, 0, 0, 0)
-	ov.ZIndex = 200
-	ov.Parent = parent
-	return ov
-end
-
--- ================== COMPONENTES: DROPDOWN ==================
--- Função nomeada: cria uma linha de dropdown FUNCIONAL, com mini animação de abrir/fechar
--- (altura da lista anima de 0 até o tamanho real, e o chevron gira).
-local function addDropdownRow(card, title, description, options, defaultIndex, onSelected)
-	local row = newFrame({
-		Size = UDim2.new(1, 0, 0, 50),
-		BackgroundTransparency = 1,
-		LayoutOrder = nextRowOrder(),
-	}, card)
-
-	newLabel({
-		Size = UDim2.new(0.5, 0, 0, 15),
-		Text = title,
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-	}, row)
-
-	newLabel({
-		Size = UDim2.new(0.5, 0, 0, 13),
-		Position = UDim2.new(0, 0, 0, 17),
-		Text = description,
-		TextColor3 = COLORS.TextMuted,
-		TextSize = 10,
-	}, row)
-
-	local dropdownBtn = newButton({
-		Name = "Dropdown",
-		Size = UDim2.new(0.46, 0, 0, 28),
-		Position = UDim2.new(0.54, 0, 0.5, 0),
-		AnchorPoint = Vector2.new(0, 0.5),
-		BackgroundColor3 = COLORS.Field,
-		Text = "",
-		Corner = 6,
-	}, row)
-	stroke(dropdownBtn, COLORS.PanelBorder, 1)
-
-	local valueLabel = newLabel({
-		Size = UDim2.new(1, -30, 1, 0),
-		Position = UDim2.new(0, 10, 0, 0),
-		Text = options[defaultIndex] or options[1] or "",
-		TextSize = 11,
-	}, dropdownBtn)
-	-- Corta com "..." em vez de vazar/sobrepor a borda quando o nome é grande demais
-	-- (ex.: "2 - Regular Challenge #2 / 3" não cabendo na caixa fechada do dropdown).
-	valueLabel.TextTruncate = Enum.TextTruncate.AtEnd
-
-	local chevron, setChevronOpen = createChevron(dropdownBtn)
-
-	addRowDivider(row)
-
-	local selectedIndex = defaultIndex or 1
-	local listFrame -- criado dinamicamente ao abrir
-	local ROW_HEIGHT = 26
-
-	local function applySelection(index)
-		selectedIndex = index
-		valueLabel.Text = options[index]
+	-- ---------- Notificações ativas? (flag da página Settings, se existir) ----------
+	local function notificationsEnabled()
+		local v = Window.Flags["Settings.Notifications"]
+		if v == nil then v = savedFlags["Settings.Notifications"] end
+		return v ~= false
 	end
 
-	-- Função nomeada: fecha a lista aberta deste dropdown, com mini animação de encolher
-	local function closeList()
-		if not listFrame then return end
-		setChevronOpen(false)
-		if overlayBackgroundCatcher then
-			overlayBackgroundCatcher.Visible = false
-		end
-
-		local frameToClose = listFrame
-		listFrame = nil
-
-		local closeTween = TweenService:Create(
-			frameToClose,
-			TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{Size = UDim2.new(0, frameToClose.AbsoluteSize.X, 0, 0)}
-		)
-		local function onCloseTweenFinished()
-			frameToClose:Destroy()
-		end
-		closeTween.Completed:Once(onCloseTweenFinished)
-		closeTween:Play()
+	-- ================== COMPONENTES ==================
+	local function registerRow(entry, row, text)
+		entry.rows[#entry.rows + 1] = {frame = row, text = string.lower(text)}
 	end
 
-	-- Função nomeada: abre a lista de opções com mini animação (altura 0 -> altura real)
-	local function openList()
-		if closeOpenDropdown then
-			closeOpenDropdown()
-		end
+	local function addRowHeader(row, rowTitle, description, widthScale)
+		newLabel({
+			Name = "Title",
+			Size = UDim2.new(widthScale, 0, 0, 15),
+			Text = rowTitle,
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			Truncate = true,
+		}, row)
+		newLabel({
+			Name = "Description",
+			Size = UDim2.new(widthScale, 0, 0, 14),
+			Position = UDim2.new(0, 0, 0, 17),
+			Text = description,
+			TextColor3 = COLORS.TextMuted,
+			TextSize = 11,
+			Truncate = true,
+		}, row)
+	end
 
-		setChevronOpen(true)
-		if overlayBackgroundCatcher then
-			overlayBackgroundCatcher.Visible = true
-		end
+	-- ---------- DROPDOWN ----------
+	local function addDropdown(body, entry, o)
+		local rowTitle, description = o.Title or "Dropdown", o.Description or ""
+		local flag = o.Flag
+		local currentOptions = o.Options or {}
 
-		local targetHeight = #options * ROW_HEIGHT
+		local row = newFrame({Name = "DropdownRow", Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 0.5)
+		registerRow(entry, row, rowTitle .. " " .. description)
 
-		listFrame = newFrame({
-			Name = "DropdownList",
+		local dropdownBtn = newButton({
+			Name = "Dropdown",
+			Size = UDim2.new(0.46, 0, 0, 28),
+			Position = UDim2.new(0.54, 0, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = COLORS.Field,
 			Corner = 6,
-			ClipsDescendants = true,
-		}, overlay)
-		listFrame.ZIndex = 201
-		stroke(listFrame, COLORS.PanelBorder, 1)
+		}, row)
+		stroke(dropdownBtn, COLORS.PanelBorder, 1)
+		addHover(dropdownBtn, COLORS.Field, COLORS.FieldHover)
 
-		local listLayout = Instance.new("UIListLayout")
-		listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		listLayout.Parent = listFrame
+		-- índice inicial: valor salvo > Default (valor ou índice) > 1
+		local startIndex = 1
+		local savedValue = flag and savedFlags[flag]
+		if type(savedValue) == "string" and findOptionIndex(currentOptions, savedValue, nil) then
+			startIndex = findOptionIndex(currentOptions, savedValue, 1)
+		elseif type(o.Default) == "number" then
+			startIndex = o.Default
+		elseif o.Default ~= nil then
+			startIndex = findOptionIndex(currentOptions, o.Default, 1)
+		end
+		local selectedIndex = math.clamp(startIndex, 1, math.max(#currentOptions, 1))
+		initFlag(flag, currentOptions[selectedIndex])
 
-		local buttonPos = dropdownBtn.AbsolutePosition
-		local overlayPos = overlay.AbsolutePosition
-		listFrame.Position = UDim2.new(
-			0, buttonPos.X - overlayPos.X,
-			0, buttonPos.Y - overlayPos.Y + dropdownBtn.AbsoluteSize.Y + 4
-		)
-		-- Começa com altura 0 (fechado) e anima até a altura real da lista
-		listFrame.Size = UDim2.new(0, dropdownBtn.AbsoluteSize.X, 0, 0)
+		local valueLabel = newLabel({
+			Size = UDim2.new(1, -34, 1, 0),
+			Position = UDim2.new(0, 10, 0, 0),
+			Text = currentOptions[selectedIndex] or "",
+			TextSize = 12,
+			Truncate = true,
+		}, dropdownBtn)
 
-		for i, optionText in ipairs(options) do
-			local optionBtn = newButton({
-				Name = "Option" .. i,
-				Size = UDim2.new(1, 0, 0, ROW_HEIGHT),
-				BackgroundColor3 = (i == selectedIndex) and COLORS.SelectedBg or COLORS.Field,
-				Text = optionText,
-				TextSize = 11,
-				TextColor3 = (i == selectedIndex) and COLORS.Accent or COLORS.TextPrimary,
-			}, listFrame)
-			optionBtn.LayoutOrder = i
-			optionBtn.ZIndex = 202
-			-- Bug reportado: as opções da lista vinham centralizadas (herdando o
-			-- padrão do TextButton), enquanto o valor fechado do dropdown é
-			-- alinhado à esquerda — deixa os dois consistentes, sempre esquerda->direita.
-			optionBtn.TextXAlignment = Enum.TextXAlignment.Left
-			-- Mesma proteção do valueLabel: opção com nome grande corta com "..."
-			-- em vez de vazar pra fora do fundo da lista.
-			optionBtn.TextTruncate = Enum.TextTruncate.AtEnd
-			local optionPadding = Instance.new("UIPadding")
-			optionPadding.PaddingLeft = UDim.new(0, 10)
-			optionPadding.PaddingRight = UDim.new(0, 10)
-			optionPadding.Parent = optionBtn
+		local _, setChevronOpen = createChevron(dropdownBtn)
+		addDivider(row)
 
-			local function onOptionClicked()
-				applySelection(i)
-				closeList()
-				if onSelected then
-					onSelected(options[i], i)
-				end
+		local listFrame
+		local ROW_HEIGHT = 26
+
+		local function closeList()
+			if not listFrame then return end
+			setChevronOpen(false)
+			overlayCatcher.Visible = false
+
+			local frameToClose = listFrame
+			listFrame = nil
+			if closeOpenDropdown == closeList then
+				closeOpenDropdown = nil
 			end
-			optionBtn.MouseButton1Click:Connect(onOptionClicked)
+
+			local closeTween = TweenService:Create(frameToClose,
+				TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{Size = UDim2.new(0, frameToClose.Size.X.Offset, 0, 0)})
+			closeTween.Completed:Once(function()
+				frameToClose:Destroy()
+			end)
+			closeTween:Play()
 		end
 
-		local openTween = TweenService:Create(
-			listFrame,
-			TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{Size = UDim2.new(0, dropdownBtn.AbsoluteSize.X, 0, targetHeight)}
-		)
-		openTween:Play()
+		-- Aplica uma seleção: atualiza texto, flag e callback.
+		local function commit(index)
+			selectedIndex = index
+			local value = currentOptions[index]
+			valueLabel.Text = value or ""
+			setFlag(flag, value)
+			fire(o.Callback, value, index)
+		end
 
-		closeOpenDropdown = closeList
-	end
+		local function openList()
+			closeAnyOpenDropdown()
+			setChevronOpen(true)
+			overlayCatcher.Visible = true
 
-	local function onDropdownClicked()
-		if listFrame then
+			-- O overlay vive dentro do mainFrame (herda o UIScale), então as medidas
+			-- absolutas (pixels da tela) são divididas pela escala atual.
+			local scale = uiScale.Scale
+			local targetHeight = #currentOptions * ROW_HEIGHT
+			local btnPos, btnSize = dropdownBtn.AbsolutePosition, dropdownBtn.AbsoluteSize
+			local ovPos = overlay.AbsolutePosition
+			local screenBottom = screenGui.AbsolutePosition.Y + screenGui.AbsoluteSize.Y
+			local openUp = (btnPos.Y + btnSize.Y + 4 + targetHeight * scale) > screenBottom
+
+			local width = btnSize.X / scale
+			local x = (btnPos.X - ovPos.X) / scale
+
+			listFrame = newFrame({
+				Name = "DropdownList",
+				BackgroundColor3 = COLORS.Field,
+				Corner = 6,
+				ClipsDescendants = true,
+			}, overlay)
+			listFrame.ZIndex = 201
+			stroke(listFrame, COLORS.PanelBorder, 1)
+
+			local listLayout = Instance.new("UIListLayout")
+			listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			listLayout.Parent = listFrame
+
+			if openUp then
+				listFrame.AnchorPoint = Vector2.new(0, 1)
+				listFrame.Position = UDim2.new(0, x, 0, (btnPos.Y - ovPos.Y) / scale - 4)
+			else
+				listFrame.Position = UDim2.new(0, x, 0, (btnPos.Y - ovPos.Y + btnSize.Y) / scale + 4)
+			end
+			listFrame.Size = UDim2.new(0, width, 0, 0)
+
+			for i, optionText in ipairs(currentOptions) do
+				local isSelected = (i == selectedIndex)
+				local baseColor = isSelected and COLORS.SelectedBg or COLORS.Field
+				local optionBtn = newButton({
+					Name = "Option" .. i,
+					Size = UDim2.new(1, 0, 0, ROW_HEIGHT),
+					BackgroundColor3 = baseColor,
+					Text = optionText,
+					TextSize = 12,
+					TextColor3 = isSelected and COLORS.Accent or COLORS.TextPrimary,
+				}, listFrame)
+				optionBtn.LayoutOrder = i
+				optionBtn.ZIndex = 202
+				optionBtn.TextXAlignment = Enum.TextXAlignment.Left
+				optionBtn.TextTruncate = Enum.TextTruncate.AtEnd
+				addHover(optionBtn, baseColor, COLORS.SelectedBg)
+
+				local optionPadding = Instance.new("UIPadding")
+				optionPadding.PaddingLeft = UDim.new(0, 10)
+				optionPadding.PaddingRight = UDim.new(0, 10)
+				optionPadding.Parent = optionBtn
+
+				optionBtn.MouseButton1Click:Connect(function()
+					closeList()
+					commit(i)
+				end)
+			end
+
+			TweenService:Create(listFrame,
+				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{Size = UDim2.new(0, width, 0, targetHeight)}):Play()
+
+			closeOpenDropdown = closeList
+		end
+
+		dropdownBtn.MouseButton1Click:Connect(function()
+			if listFrame then closeList() else openList() end
+		end)
+
+		local api = {Row = row}
+		function api:Get()
+			return currentOptions[selectedIndex], selectedIndex
+		end
+		function api:Set(value)
+			local index = findOptionIndex(currentOptions, value, nil)
+			if index then commit(index) end
+		end
+		-- Troca a lista de opções (ex.: estágios que dependem de outro dropdown).
+		function api:SetOptions(newOptions, preferredValue)
 			closeList()
-			closeOpenDropdown = nil
-		else
-			openList()
+			currentOptions = newOptions or {}
+			commit(findOptionIndex(currentOptions, preferredValue, 1))
 		end
-	end
-	dropdownBtn.MouseButton1Click:Connect(onDropdownClicked)
 
-	local function getSelected()
-		return options[selectedIndex], selectedIndex
+		if o.CallOnLoad then fire(o.Callback, currentOptions[selectedIndex], selectedIndex) end
+		return api
 	end
 
-	-- Aplica a seleção inicial no HubState (via callback), se houver
-	if onSelected then
-		onSelected(options[defaultIndex] or options[1], defaultIndex or 1)
-	end
-
-	return row, getSelected
-end
-
--- ================== COMPONENTES: SLIDER ==================
-local function addSliderRow(card, title, description, min, max, default, suffix, onChanged)
-	suffix = suffix or ""
-	local row = newFrame({
-		Size = UDim2.new(1, 0, 0, 58),
-		BackgroundTransparency = 1,
-		LayoutOrder = nextRowOrder(),
-	}, card)
-
-	newLabel({
-		Size = UDim2.new(0.6, 0, 0, 15),
-		Text = title,
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-	}, row)
-
-	newLabel({
-		Size = UDim2.new(0.6, 0, 0, 13),
-		Position = UDim2.new(0, 0, 0, 17),
-		Text = description,
-		TextColor3 = COLORS.TextMuted,
-		TextSize = 10,
-	}, row)
-
-	local valueLabel = newLabel({
-		Size = UDim2.new(0.4, -4, 0, 15),
-		Position = UDim2.new(0.6, 4, 0, 0),
-		Text = tostring(default) .. suffix,
-		TextSize = 11,
-		TextColor3 = COLORS.TextMuted,
-		TextXAlignment = Enum.TextXAlignment.Right,
-	}, row)
-
-	local track = newFrame({
-		Name = "SliderTrack",
-		Size = UDim2.new(1, 0, 0, 6),
-		Position = UDim2.new(0, 0, 0, 40),
-		BackgroundColor3 = COLORS.ToggleOff,
-		Corner = 3,
-	}, row)
-
-	local fill = newFrame({
-		Name = "SliderFill",
-		Size = UDim2.new(0, 0, 1, 0),
-		BackgroundColor3 = COLORS.Accent,
-		Corner = 3,
-	}, track)
-
-	local knob = newFrame({
-		Name = "SliderKnob",
-		Size = UDim2.new(0, 14, 0, 14),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0, 0, 0.5, 0),
-		BackgroundColor3 = COLORS.Knob,
-		Corner = 7,
-	}, track)
-
-	local dragCatcher = Instance.new("TextButton")
-	dragCatcher.Name = "SliderDragCatcher"
-	dragCatcher.BackgroundTransparency = 1
-	dragCatcher.Size = UDim2.new(1, 0, 0, 20)
-	dragCatcher.Position = UDim2.new(0, 0, 0.5, -10)
-	dragCatcher.Text = ""
-	dragCatcher.Parent = track
-
-	local currentValue = default
-	local fillTween, knobTween -- tweens ativos, cancelados a cada nova mudança pra não acumular
-
-	-- Função nomeada: aplica o valor com uma mini animação suave (fill + knob deslizam
-	-- até a nova posição em vez de saltar instantaneamente a cada passo do arraste).
-	local function applyValue(value)
-		value = math.clamp(value, min, max)
-		currentValue = math.floor(value + 0.5)
-		local ratio = (currentValue - min) / (max - min)
-
-		if fillTween then fillTween:Cancel() end
-		if knobTween then knobTween:Cancel() end
-
-		local tweenInfo = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-		fillTween = TweenService:Create(fill, tweenInfo, {Size = UDim2.new(ratio, 0, 1, 0)})
-		knobTween = TweenService:Create(knob, tweenInfo, {Position = UDim2.new(ratio, 0, 0.5, 0)})
-		fillTween:Play()
-		knobTween:Play()
-
-		valueLabel.Text = tostring(currentValue) .. suffix
-	end
-
-	local function valueFromMouseX(mouseX)
-		local trackPos = track.AbsolutePosition.X
-		local trackWidth = track.AbsoluteSize.X
-		local ratio = math.clamp((mouseX - trackPos) / trackWidth, 0, 1)
-		return min + (max - min) * ratio
-	end
-
-	local isDragging = false
-	local dragMoveConnection
-
-	local function onDragEnded()
-		isDragging = false
-		if dragMoveConnection then
-			dragMoveConnection:Disconnect()
-			dragMoveConnection = nil
-		end
-	end
-
-	local function onDragMoved(input)
-		if not isDragging then return end
-		if input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch then
-			applyValue(valueFromMouseX(input.Position.X))
-			if onChanged then
-				onChanged(currentValue)
-			end
-		end
-	end
-
-	local function onDragStarted(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			isDragging = true
-			applyValue(valueFromMouseX(input.Position.X))
-			if onChanged then
-				onChanged(currentValue)
-			end
-			dragMoveConnection = UserInputService.InputChanged:Connect(onDragMoved)
-		end
-	end
-
-	dragCatcher.InputBegan:Connect(onDragStarted)
-
-	local function onDragInputEnded(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			onDragEnded()
-		end
-	end
-	dragCatcher.InputEnded:Connect(onDragInputEnded)
-
-	applyValue(default)
-	if onChanged then
-		onChanged(currentValue)
-	end
-
-	addRowDivider(row)
-
-	local function getValue()
-		return currentValue
-	end
-
-	return row, getValue
-end
-
--- ================== COMPONENTES: KEYBIND ==================
-local function addKeybindRow(card, title, description, defaultKeyCode, onPressed)
-	local row = newFrame({
-		Size = UDim2.new(1, 0, 0, 46),
-		BackgroundTransparency = 1,
-		LayoutOrder = nextRowOrder(),
-	}, card)
-
-	newLabel({
-		Size = UDim2.new(0.6, 0, 0, 15),
-		Text = title,
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-	}, row)
-
-	newLabel({
-		Size = UDim2.new(0.6, 0, 0, 13),
-		Position = UDim2.new(0, 0, 0, 17),
-		Text = description,
-		TextColor3 = COLORS.TextMuted,
-		TextSize = 10,
-	}, row)
-
-	local keyBtn = newButton({
-		Name = "KeybindButton",
-		Size = UDim2.new(0, 90, 0, 26),
-		Position = UDim2.new(1, -90, 0.5, 0),
-		AnchorPoint = Vector2.new(0, 0.5),
-		BackgroundColor3 = COLORS.Field,
-		Text = defaultKeyCode.Name,
-		TextSize = 11,
-		Corner = 6,
-	}, row)
-	stroke(keyBtn, COLORS.PanelBorder, 1)
-
-	local currentKeyCode = defaultKeyCode
-	local isListening = false
-	local listenConnection
-
-	local function stopListening(newKeyCode)
-		isListening = false
-		if listenConnection then
-			listenConnection:Disconnect()
-			listenConnection = nil
-		end
-		if newKeyCode then
-			currentKeyCode = newKeyCode
-		end
-		keyBtn.Text = currentKeyCode.Name
-	end
-
-	local function startListening()
-		isListening = true
-		keyBtn.Text = "..."
-
-		local function onCaptureInput(input, gameProcessed)
-			if gameProcessed then return end
-			if input.UserInputType == Enum.UserInputType.Keyboard then
-				stopListening(input.KeyCode)
-			end
-		end
-		listenConnection = UserInputService.InputBegan:Connect(onCaptureInput)
-	end
-
-	local function onKeybindButtonClicked()
-		if isListening then
-			stopListening()
-		else
-			startListening()
-		end
-	end
-	keyBtn.MouseButton1Click:Connect(onKeybindButtonClicked)
-
-	local function onGlobalInput(input, gameProcessed)
-		if gameProcessed or isListening then return end
-		if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == currentKeyCode then
-			if onPressed then
-				onPressed()
-			end
-		end
-	end
-	UserInputService.InputBegan:Connect(onGlobalInput)
-
-	addRowDivider(row)
-
-	local function getKeyCode()
-		return currentKeyCode
-	end
-
-	return row, getKeyCode
-end
-
--- ================== COMPONENTES: TEXTBOX / INSERT KEY ==================
-local function addTextboxRow(card, title, description, placeholder, buttonText, onSubmit)
-	local row = newFrame({
-		Size = UDim2.new(1, 0, 0, 66),
-		BackgroundTransparency = 1,
-		LayoutOrder = nextRowOrder(),
-	}, card)
-
-	newLabel({
-		Size = UDim2.new(1, 0, 0, 15),
-		Text = title,
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-	}, row)
-
-	newLabel({
-		Size = UDim2.new(1, 0, 0, 13),
-		Position = UDim2.new(0, 0, 0, 17),
-		Text = description,
-		TextColor3 = COLORS.TextMuted,
-		TextSize = 10,
-	}, row)
-
-	local inputBox = newFrame({
-		Name = "TextboxField",
-		Size = UDim2.new(1, -84, 0, 28),
-		Position = UDim2.new(0, 0, 0, 34),
-		BackgroundColor3 = COLORS.Field,
-		Corner = 6,
-	}, row)
-	stroke(inputBox, COLORS.PanelBorder, 1)
-
-	local textBox = Instance.new("TextBox")
-	textBox.Name = "InsertKeyInput"
-	textBox.BackgroundTransparency = 1
-	textBox.Size = UDim2.new(1, -16, 1, 0)
-	textBox.Position = UDim2.new(0, 8, 0, 0)
-	textBox.Font = Enum.Font.Gotham
-	textBox.PlaceholderText = placeholder or ""
-	textBox.PlaceholderColor3 = COLORS.TextMuted
-	textBox.Text = ""
-	textBox.TextColor3 = COLORS.TextPrimary
-	textBox.TextSize = 12
-	textBox.TextXAlignment = Enum.TextXAlignment.Left
-	textBox.ClearTextOnFocus = false
-	textBox.Parent = inputBox
-
-	local actionBtn = newButton({
-		Name = "ActionButton",
-		Size = UDim2.new(0, 76, 0, 28),
-		Position = UDim2.new(1, -76, 0, 34),
-		BackgroundColor3 = COLORS.Accent,
-		Text = buttonText or "Insert",
-		TextColor3 = COLORS.AccentDark,
-		TextSize = 12,
-		Corner = 6,
-	}, row)
-
-	local function onActionButtonClicked()
-		if onSubmit then
-			onSubmit(textBox.Text)
-		end
-	end
-	actionBtn.MouseButton1Click:Connect(onActionButtonClicked)
-
-	local function onFocusLost(enterPressed)
-		if enterPressed and onSubmit then
-			onSubmit(textBox.Text)
-		end
-	end
-	textBox.FocusLost:Connect(onFocusLost)
-
-	addRowDivider(row)
-
-	return row, textBox
-end
-
--- ================== ROOT ==================
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "NervAutomationUI"
-screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.Parent = playerGui
-
-local mainFrame = newFrame({
-	Name = "MainFrame",
-	Size = UDim2.new(0, 940, 0, 580),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	BackgroundColor3 = COLORS.Background,
-	Corner = 12,
-}, screenGui)
-stroke(mainFrame, COLORS.PanelBorder, 1)
-
-overlay = createOverlay(screenGui)
-
-local function onOverlayBackgroundClicked()
-	closeAnyOpenDropdown()
-end
-overlayBackgroundCatcher = Instance.new("TextButton")
-overlayBackgroundCatcher.Name = "OverlayBackgroundCatcher"
-overlayBackgroundCatcher.BackgroundTransparency = 1
-overlayBackgroundCatcher.Size = UDim2.new(1, 0, 1, 0)
-overlayBackgroundCatcher.Text = ""
-overlayBackgroundCatcher.ZIndex = 199
-overlayBackgroundCatcher.Visible = false
-overlayBackgroundCatcher.Parent = overlay
-overlayBackgroundCatcher.MouseButton1Click:Connect(onOverlayBackgroundClicked)
-
--- ================== SISTEMA DE NOTIFICAÇÃO (TOAST) ==================
--- Container fixo no canto inferior direito da tela, empilhando notificações de
--- baixo pra cima. Fica parentado no screenGui (não no mainFrame) pra continuar
--- visível mesmo se a janela for minimizada.
-local notificationContainer = newFrame({
-	Name = "NotificationContainer",
-	Size = UDim2.new(0, 260, 1, -20),
-	Position = UDim2.new(1, -14, 1, -14),
-	AnchorPoint = Vector2.new(1, 1),
-	BackgroundTransparency = 1,
-}, screenGui)
-notificationContainer.ZIndex = 300
-
-local notifLayout = Instance.new("UIListLayout")
-notifLayout.SortOrder = Enum.SortOrder.LayoutOrder
-notifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-notifLayout.Padding = UDim.new(0, 8)
-notifLayout.Parent = notificationContainer
-
-local notifOrder = 0
-
--- Função nomeada: mostra um toast (título + mensagem) que some sozinho depois de
--- alguns segundos. kind controla a cor da barrinha lateral: "info" | "success" | "error".
-local function showNotification(title, message, kind)
-	local accentColor = COLORS.Accent
-	if kind == "success" then
-		accentColor = Color3.fromRGB(90, 210, 130)
-	elseif kind == "error" then
-		accentColor = Color3.fromRGB(230, 90, 90)
-	end
-
-	notifOrder = notifOrder + 1
-
-	local notifCanvas = Instance.new("CanvasGroup")
-	notifCanvas.Name = "Notification"
-	notifCanvas.BackgroundTransparency = 1
-	notifCanvas.Size = UDim2.new(1, 0, 0, 0)
-	notifCanvas.AutomaticSize = Enum.AutomaticSize.Y
-	notifCanvas.LayoutOrder = notifOrder
-	notifCanvas.GroupTransparency = 1
-	notifCanvas.ZIndex = 300
-	notifCanvas.Parent = notificationContainer
-
-	local card = newFrame({
-		Name = "NotifCard",
-		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundColor3 = COLORS.Card,
-		Corner = 8,
-	}, notifCanvas)
-	card.AutomaticSize = Enum.AutomaticSize.Y
-	card.ZIndex = 300
-	stroke(card, COLORS.PanelBorder, 1)
-
-	newFrame({
-		Name = "AccentBar",
-		Size = UDim2.new(0, 3, 1, 0),
-		BackgroundColor3 = accentColor,
-	}, card).ZIndex = 300
-
-	local textHolder = newFrame({
-		Name = "TextHolder",
-		Size = UDim2.new(1, -15, 0, 0),
-		Position = UDim2.new(0, 12, 0, 0),
-		BackgroundTransparency = 1,
-	}, card)
-	textHolder.AutomaticSize = Enum.AutomaticSize.Y
-	textHolder.ZIndex = 300
-
-	local textLayout = Instance.new("UIListLayout")
-	textLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	textLayout.Padding = UDim.new(0, 2)
-	textLayout.Parent = textHolder
-
-	local textPad = Instance.new("UIPadding")
-	textPad.PaddingTop = UDim.new(0, 8)
-	textPad.PaddingBottom = UDim.new(0, 8)
-	textPad.PaddingRight = UDim.new(0, 8)
-	textPad.Parent = textHolder
-
-	local titleLabel = newLabel({
-		Size = UDim2.new(1, 0, 0, 14),
-		Text = title,
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-	}, textHolder)
-	titleLabel.ZIndex = 300
-
-	if message and message ~= "" then
-		local messageLabel = newLabel({
-			Size = UDim2.new(1, 0, 0, 0),
-			Text = message,
+	-- ---------- SLIDER ----------
+	local function addSlider(body, entry, o)
+		local rowTitle, description = o.Title or "Slider", o.Description or ""
+		local flag = o.Flag
+		local min, max = o.Min or 0, o.Max or 100
+		local step = o.Step or 1
+		local suffix = o.Suffix or ""
+
+		local row = newFrame({Name = "SliderRow", Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 0.6)
+		registerRow(entry, row, rowTitle .. " " .. description)
+
+		local valueLabel = newLabel({
+			Size = UDim2.new(0.4, -4, 0, 15),
+			Position = UDim2.new(0.6, 4, 0, 0),
+			Text = "",
+			TextSize = 12,
 			TextColor3 = COLORS.TextMuted,
-			TextSize = 10,
-			TextWrapped = true,
-		}, textHolder)
-		messageLabel.AutomaticSize = Enum.AutomaticSize.Y
-		messageLabel.ZIndex = 300
-	end
+			TextXAlignment = Enum.TextXAlignment.Right,
+		}, row)
 
-	TweenService:Create(
-		notifCanvas,
-		TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{GroupTransparency = 0}
-	):Play()
+		local sliderTrack = newFrame({
+			Name = "SliderTrack",
+			Size = UDim2.new(1, 0, 0, 6),
+			Position = UDim2.new(0, 0, 0, 40),
+			BackgroundColor3 = COLORS.ToggleOff,
+			Corner = 3,
+		}, row)
 
-	-- Função nomeada: some com o toast depois do tempo de exibição
-	local function dismissNotification()
-		local fadeOut = TweenService:Create(
-			notifCanvas,
-			TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{GroupTransparency = 1}
-		)
-		local function onFadeOutDone()
-			notifCanvas:Destroy()
+		local fill = newFrame({
+			Name = "SliderFill",
+			Size = UDim2.new(0, 0, 1, 0),
+			BackgroundColor3 = COLORS.Accent,
+			Corner = 3,
+		}, sliderTrack)
+
+		local knob = newFrame({
+			Name = "SliderKnob",
+			Size = UDim2.new(0, 14, 0, 14),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0, 0, 0.5, 0),
+			BackgroundColor3 = COLORS.Knob,
+			Corner = 7,
+		}, sliderTrack)
+
+		local dragCatcher = Instance.new("TextButton")
+		dragCatcher.Name = "SliderDragCatcher"
+		dragCatcher.BackgroundTransparency = 1
+		dragCatcher.Size = UDim2.new(1, 0, 0, 20)
+		dragCatcher.Position = UDim2.new(0, 0, 0.5, -10)
+		dragCatcher.Text = ""
+		dragCatcher.Parent = sliderTrack
+
+		local function snap(value)
+			value = math.clamp(value, min, max)
+			value = math.floor((value - min) / step + 0.5) * step + min
+			return math.clamp(value, min, max)
 		end
-		fadeOut.Completed:Once(onFadeOutDone)
-		fadeOut:Play()
-	end
-	task.delay(3, dismissNotification)
-end
 
--- ================== SIDEBAR ==================
-local sidebar = newFrame({
-	Name = "Sidebar",
-	Size = UDim2.new(0, 200, 1, 0),
-	BackgroundColor3 = COLORS.Sidebar,
-}, mainFrame)
-corner(sidebar, 12)
-newFrame({
-	Name = "SidebarCornerFix",
-	Size = UDim2.new(0, 12, 1, 0),
-	Position = UDim2.new(1, -12, 0, 0),
-	BackgroundColor3 = COLORS.Sidebar,
-}, sidebar)
-
-local logoHolder = newFrame({
-	Name = "LogoHolder",
-	Size = UDim2.new(1, -28, 0, 50),
-	Position = UDim2.new(0, 14, 0, 14),
-	BackgroundTransparency = 1,
-}, sidebar)
-
-local logoCircle = newFrame({
-	Name = "LogoCircle",
-	Size = UDim2.new(0, 40, 0, 40),
-	BackgroundColor3 = COLORS.Field,
-	BackgroundTransparency = 1,
-	Corner = 20,
-}, logoHolder)
-
-createIcon({
-	Name = "LogoIcon",
-	Size = UDim2.new(0, 60, 0, 60),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	AssetId = ASSETS.LogoIcon,
-	FallbackText = "🐐",
-	TextSize = 18,
-}, logoCircle)
-
-newLabel({
-	Name = "Title",
-	Size = UDim2.new(1, -50, 0, 20),
-	Position = UDim2.new(0, 50, 0, 0),
-	Text = "NERV",
-	Font = Enum.Font.GothamBold,
-	TextSize = 16,
-}, logoHolder)
-
-newLabel({
-	Name = "Subtitle",
-	Size = UDim2.new(1, -50, 0, 16),
-	Position = UDim2.new(0, 50, 0, 22),
-	Text = "Anime Expeditions",
-	TextColor3 = COLORS.TextMuted,
-	TextSize = 11,
-}, logoHolder)
-
-newFrame({
-	Name = "SidebarDivider",
-	Size = UDim2.new(1, -28, 0, 1),
-	Position = UDim2.new(0, 14, 0, 74),
-	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-	Glow = true,
-	GlowTransparency = 0.35,
-	GlowBlur = UDim.new(0, 6),
-}, sidebar)
-
-local navList = newFrame({
-	Name = "NavList",
-	Size = UDim2.new(1, -22, 0, 140),
-	Position = UDim2.new(0, 11, 0, 88),
-	BackgroundTransparency = 1,
-}, sidebar)
-
-local navLayout = Instance.new("UIListLayout")
-navLayout.SortOrder = Enum.SortOrder.LayoutOrder
-navLayout.Padding = UDim.new(0, 4)
-navLayout.Parent = navList
-
-local navItems = {}
-local currentNav = "Automation"
-
-local function setNavItemActive(name, active)
-	local data = navItems[name]
-	if not data then return end
-	data.button.BackgroundColor3 = active and COLORS.NavActiveBg or COLORS.Sidebar
-	data.label.TextColor3 = active and COLORS.Accent or COLORS.TextPrimary
-	local iconColor = active and COLORS.Accent or COLORS.TextMuted
-	if data.icon:IsA("ImageLabel") then
-		data.icon.ImageColor3 = iconColor
-	else
-		data.icon.TextColor3 = iconColor
-	end
-	-- Mini animação: a borda com brilho aparece/desaparece suavemente em vez de
-	-- só trocar o fundo seco pra um quadradinho escuro.
-	TweenService:Create(
-		data.stroke,
-		TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{Transparency = active and 0.35 or 1}
-	):Play()
-end
-
-local function selectNavItem(name)
-	currentNav = name
-	for itemName in pairs(navItems) do
-		setNavItemActive(itemName, itemName == name)
-	end
-end
-
-local navItemOrder = 0
-local function createNavItem(assetId, fallbackEmoji, text, active)
-	navItemOrder = navItemOrder + 1
-	local btn = newButton({
-		Name = text .. "Nav",
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = active and COLORS.NavActiveBg or COLORS.Sidebar,
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = active and COLORS.Accent or COLORS.TextMuted,
-		Text = "",
-		Corner = 10,
-	}, navList)
-	btn.LayoutOrder = navItemOrder
-
-	-- Borda com leve brilho azul quando ativo (em vez do quadradinho liso/escuro).
-	-- Transparency 1 = invisível quando inativo; ~0.35 = brilho sutil quando ativo.
-	local navStroke = stroke(btn, COLORS.Accent, 1)
-	navStroke.Transparency = active and 0.35 or 1
-
-	local icon = createIcon({
-		Size = UDim2.new(0, 18, 0, 18),
-		Position = UDim2.new(0, 10, 0.5, 0),
-		AnchorPoint = Vector2.new(0, 0.5),
-		AssetId = assetId,
-		FallbackText = fallbackEmoji,
-		TextSize = 14,
-		ImageColor3 = active and COLORS.Accent or COLORS.TextMuted,
-	}, btn)
-
-	local label = newLabel({
-		Size = UDim2.new(1, -40, 1, 0),
-		Position = UDim2.new(0, 34, 0, 0),
-		Text = text,
-		Font = Enum.Font.GothamBold,
-		TextColor3 = active and COLORS.Accent or COLORS.TextMuted,
-		TextSize = 14,
-	}, btn)
-
-	local function onNavItemClicked()
-		if currentNav == text then return end
-		closeAnyOpenDropdown()
-		fadeSwitch(contentCanvas, function()
-			selectNavItem(text)
-			updateActivePage()
-		end)
-	end
-	btn.MouseButton1Click:Connect(onNavItemClicked)
-
-	navItems[text] = {button = btn, label = label, icon = icon, stroke = navStroke}
-	return btn
-end
-
-createNavItem(ASSETS.NavAutomation, "📈", "Automation", true)
-createNavItem(ASSETS.NavSettings, "⚙️", "Settings", false)
-
--- ================== CONTAINER DIREITO ==================
-local rightContainer = newFrame({
-	Name = "RightContainer",
-	Size = UDim2.new(1, -200, 1, 0),
-	Position = UDim2.new(0, 200, 0, 0),
-	BackgroundTransparency = 1,
-}, mainFrame)
-
--- ================== TOP BAR ==================
-local topBar = newFrame({
-	Name = "TopBar",
-	Size = UDim2.new(1, -28, 0, 40),
-	Position = UDim2.new(0, 14, 0, 12),
-	BackgroundTransparency = 1,
-}, rightContainer)
-
--- ===== Arrastar a janela pela TopBar =====
--- Padrão clássico de drag no Roblox: guarda a posição do mouse/touch e a posição
--- da janela no momento do clique, depois só soma o delta a cada InputChanged.
--- Funciona mesmo clicando em cima da SearchBox ou dos botões min/close (o clique
--- neles continua dispensando normal; a janela só "anda" se o mouse realmente mover).
-local isDraggingWindow = false
-local dragInput
-local dragStartInputPos
-local dragStartFramePos
-
-local function updateWindowDrag(input)
-	local delta = input.Position - dragStartInputPos
-	mainFrame.Position = UDim2.new(
-		dragStartFramePos.X.Scale, dragStartFramePos.X.Offset + delta.X,
-		dragStartFramePos.Y.Scale, dragStartFramePos.Y.Offset + delta.Y
-	)
-end
-
-local function onDragInputStateChanged(input)
-	if input.UserInputState == Enum.UserInputState.End then
-		isDraggingWindow = false
-	end
-end
-
-local function onTopBarInputBegan(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		closeAnyOpenDropdown()
-		isDraggingWindow = true
-		dragStartInputPos = input.Position
-		dragStartFramePos = mainFrame.Position
-		input.Changed:Connect(function()
-			onDragInputStateChanged(input)
-		end)
-	end
-end
-
-local function onTopBarInputChanged(input)
-	if input.UserInputType == Enum.UserInputType.MouseMovement
-		or input.UserInputType == Enum.UserInputType.Touch then
-		dragInput = input
-	end
-end
-
-local function onGlobalInputChanged(input)
-	if input == dragInput and isDraggingWindow then
-		updateWindowDrag(input)
-	end
-end
-
-topBar.InputBegan:Connect(onTopBarInputBegan)
-topBar.InputChanged:Connect(onTopBarInputChanged)
-UserInputService.InputChanged:Connect(onGlobalInputChanged)
-
-local pageTitleLabel = newLabel({
-	Name = "PageTitle",
-	Size = UDim2.new(0, 200, 1, 0),
-	Text = "Automation",
-	Font = Enum.Font.GothamBold,
-	TextSize = 16,
-}, topBar)
-
-newLabel({
-	Name = "PageCounter",
-	Size = UDim2.new(0, 50, 1, 0),
-	Position = UDim2.new(0, 100, 0, 0),
-	Text = "01 / 02",
-	TextColor3 = COLORS.TextMuted,
-	TextSize = 11,
-}, topBar)
-
-local searchBox = newFrame({
-	Name = "SearchBox",
-	Size = UDim2.new(0, 180, 0, 28),
-	Position = UDim2.new(1, -260, 0.5, 0),
-	AnchorPoint = Vector2.new(0, 0.5),
-	BackgroundColor3 = COLORS.Field,
-	Corner = 7,
-}, topBar)
-
-createIcon({
-	Name = "SearchIcon",
-	Size = UDim2.new(0, 15, 0, 15),
-	Position = UDim2.new(0, 9, 0.5, 0),
-	AnchorPoint = Vector2.new(0, 0.5),
-	AssetId = ASSETS.IconSearch,
-	FallbackText = "🔍",
-	TextSize = 12,
-	ImageColor3 = COLORS.TextMuted,
-}, searchBox)
-
-local searchInput = Instance.new("TextBox")
-searchInput.Name = "SearchInput"
-searchInput.BackgroundTransparency = 1
-searchInput.Size = UDim2.new(1, -32, 1, 0)
-searchInput.Position = UDim2.new(0, 28, 0, 0)
-searchInput.Font = Enum.Font.Gotham
-searchInput.PlaceholderText = "Search"
-searchInput.PlaceholderColor3 = COLORS.TextMuted
-searchInput.Text = ""
-searchInput.TextColor3 = COLORS.TextPrimary
-searchInput.TextSize = 12
-searchInput.TextXAlignment = Enum.TextXAlignment.Left
-searchInput.ClearTextOnFocus = false
-searchInput.Parent = searchBox
-
-local minimizeBtn = newButton({
-	Name = "MinimizeBtn",
-	Size = UDim2.new(0, 28, 0, 28),
-	Position = UDim2.new(1, -60, 0.5, 0),
-	AnchorPoint = Vector2.new(0, 0.5),
-	BackgroundColor3 = COLORS.Field,
-	BackgroundTransparency = 1,
-	Text = "",
-	Corner = 7,
-}, topBar)
-createIcon({
-	Name = "MinimizeIcon",
-	Size = UDim2.new(0, 12, 0, 12),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	AssetId = ASSETS.IconMinimize,
-	FallbackText = "—",
-	TextSize = 14,
-	ImageColor3 = COLORS.TextPrimary,
-}, minimizeBtn)
-
-local closeBtn = newButton({
-	Name = "CloseBtn",
-	Size = UDim2.new(0, 28, 0, 28),
-	Position = UDim2.new(1, -28, 0.5, 0),
-	AnchorPoint = Vector2.new(0, 0.5),
-	BackgroundColor3 = COLORS.Field,
-	BackgroundTransparency = 1,
-	Text = "",
-	Corner = 7,
-}, topBar)
-createIcon({
-	Name = "CloseIcon",
-	Size = UDim2.new(0, 12, 0, 12),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	AssetId = ASSETS.IconClose,
-	FallbackText = "✕",
-	TextSize = 14,
-	ImageColor3 = COLORS.TextPrimary,
-}, closeBtn)
-
-local function onCloseButtonClicked()
-	closeAnyOpenDropdown()
-	screenGui:Destroy()
-end
-
-local function onMinimizeButtonClicked()
-	closeAnyOpenDropdown()
-	mainFrame.Visible = not mainFrame.Visible
-end
-
-closeBtn.MouseButton1Click:Connect(onCloseButtonClicked)
-minimizeBtn.MouseButton1Click:Connect(onMinimizeButtonClicked)
-
--- ================== TAB BAR ==================
-local tabBar = newFrame({
-	Name = "TabBar",
-	Size = UDim2.new(1, -28, 0, 28),
-	Position = UDim2.new(0, 14, 0, 58),
-	BackgroundTransparency = 1,
-}, rightContainer)
-
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.Padding = UDim.new(0, 18)
-tabLayout.Parent = tabBar
-
-local tabNames = {"Macro", "Auto Join", "Claims", "Goal Planner", "Summoning", "Inventory", "Webhook"}
-local tabButtons = {}
-local currentTab = "Auto Join"
-
-local function selectTab(name)
-	currentTab = name
-	for tabName, data in pairs(tabButtons) do
-		local isActive = tabName == name
-		data.label.TextColor3 = isActive and COLORS.TextPrimary or COLORS.TextMuted
-		data.label.Font = isActive and Enum.Font.GothamBold or Enum.Font.GothamMedium
-		data.underline.Visible = isActive
-	end
-end
-
-local tabOrder = 0
-local function createTabButton(name)
-	tabOrder = tabOrder + 1
-	local tabHolder = newFrame({
-		Name = name .. "Tab",
-		Size = UDim2.new(0, 0, 1, 0),
-		BackgroundTransparency = 1,
-	}, tabBar)
-	tabHolder.AutomaticSize = Enum.AutomaticSize.X
-	tabHolder.LayoutOrder = tabOrder
-
-	local btn = Instance.new("TextButton")
-	btn.Name = "TabButton"
-	btn.BackgroundTransparency = 1
-	btn.Size = UDim2.new(0, 0, 1, -4)
-	btn.AutomaticSize = Enum.AutomaticSize.X
-	btn.Font = Enum.Font.GothamMedium
-	btn.Text = name
-	btn.TextColor3 = COLORS.TextMuted
-	btn.TextSize = 12
-	btn.Parent = tabHolder
-
-	local underline = newFrame({
-		Name = "Underline",
-		Size = UDim2.new(1, 0, 0, 2),
-		Position = UDim2.new(0, 0, 1, -2),
-		BackgroundColor3 = COLORS.Accent,
-	}, tabHolder)
-	underline.Visible = false
-
-	local function onTabClicked()
-		if currentTab == name then return end
-		closeAnyOpenDropdown()
-		fadeSwitch(contentCanvas, function()
-			selectTab(name)
-			updateActivePage()
-		end)
-	end
-	btn.MouseButton1Click:Connect(onTabClicked)
-
-	tabButtons[name] = {label = btn, underline = underline}
-	return tabHolder
-end
-
-for _, name in ipairs(tabNames) do
-	createTabButton(name)
-end
-selectTab("Auto Join")
-
-newFrame({
-	Name = "TabBarDivider",
-	Size = UDim2.new(1, -28, 0, 1),
-	Position = UDim2.new(0, 14, 0, 90),
-	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-	Glow = true,
-	GlowTransparency = 0.35,
-	GlowBlur = UDim.new(0, 6),
-}, rightContainer)
-
--- ================== CONTENT (SCROLLING) ==================
-contentCanvas = Instance.new("CanvasGroup")
-contentCanvas.Name = "ContentCanvas"
-contentCanvas.BackgroundTransparency = 1
-contentCanvas.Size = UDim2.new(1, -28, 1, -108)
-contentCanvas.Position = UDim2.new(0, 14, 0, 100)
-contentCanvas.GroupTransparency = 0
-contentCanvas.Parent = rightContainer
-
-local content = Instance.new("ScrollingFrame")
-content.Name = "Content"
-content.Size = UDim2.new(1, 0, 1, 0)
-content.Position = UDim2.new(0, 0, 0, 0)
-content.BackgroundTransparency = 1
-content.BorderSizePixel = 0
-content.ScrollBarThickness = 3
-content.ScrollBarImageColor3 = COLORS.Field
-content.CanvasSize = UDim2.new(0, 0, 0, 760)
-content.Parent = contentCanvas
-
--- Fecha o dropdown aberto assim que o usuário rola a tela: a lista é desenhada
--- num overlay à parte (pra ficar por cima de tudo), então ela NÃO acompanha o
--- scroll do content — sem isso, ela ficava "grudada" no lugar antigo, flutuando
--- desconectada do botão que a abriu.
-local function onContentScrolled()
-	closeAnyOpenDropdown()
-end
-content:GetPropertyChangedSignal("CanvasPosition"):Connect(onContentScrolled)
-
--- Página "placeholder": mostrada quando a aba/menu ativo ainda não tem conteúdo real
--- (ex.: Settings, Macro, Claims...). Mantém o hub coerente em vez de fingir que
--- trocou de página sem realmente trocar nada.
-local placeholderPage = newFrame({
-	Name = "PlaceholderPage",
-	Size = UDim2.new(1, 0, 1, 0),
-	BackgroundTransparency = 1,
-	Visible = false,
-}, contentCanvas)
-
-local placeholderTitle = newLabel({
-	Name = "PlaceholderTitle",
-	Size = UDim2.new(1, 0, 0, 22),
-	Position = UDim2.new(0, 0, 0, 60),
-	Text = "",
-	Font = Enum.Font.GothamBold,
-	TextSize = 16,
-	TextXAlignment = Enum.TextXAlignment.Center,
-}, placeholderPage)
-
-newLabel({
-	Name = "PlaceholderSubtitle",
-	Size = UDim2.new(1, 0, 0, 16),
-	Position = UDim2.new(0, 0, 0, 86),
-	Text = "Em construção — em breve.",
-	TextColor3 = COLORS.TextMuted,
-	TextSize = 12,
-	TextXAlignment = Enum.TextXAlignment.Center,
-}, placeholderPage)
-
--- Função nomeada: decide qual página mostrar com base no menu lateral e na aba ativos.
--- É a "lógica do hub": Settings e qualquer aba != "Auto Join" caem no placeholder;
--- só "Automation" + "Auto Join" mostram o conteúdo real (STORY/RAID/CHALLENGE/...).
-function updateActivePage()
-	if currentNav ~= "Automation" then
-		content.Visible = false
-		placeholderPage.Visible = true
-		placeholderTitle.Text = currentNav
-		pageTitleLabel.Text = currentNav
-	elseif currentTab ~= "Auto Join" then
-		content.Visible = false
-		placeholderPage.Visible = true
-		placeholderTitle.Text = currentTab
-		pageTitleLabel.Text = currentTab
-	else
-		placeholderPage.Visible = false
-		content.Visible = true
-		pageTitleLabel.Text = "Automation"
-	end
-end
-
--- ================== CARD BUILDER ==================
-local function createCard(props, parent)
-	local card = newFrame({
-		Name = props.Name,
-		Size = props.Size,
-		Position = props.Position,
-		BackgroundColor3 = COLORS.Card,
-		Corner = 10,
-	}, parent)
-	card.AutomaticSize = Enum.AutomaticSize.Y
-	stroke(card, COLORS.PanelBorder, 1)
-
-	local outerLayout = Instance.new("UIListLayout")
-	outerLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	outerLayout.Padding = UDim.new(0, 0)
-	outerLayout.Parent = card
-
-	local headerBar = newFrame({
-		Name = "HeaderBar",
-		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = COLORS.CardHeaderBg,
-		Corner = 10,
-	}, card)
-	headerBar.LayoutOrder = 1
-
-	newFrame({
-		Name = "HeaderBarCornerFix",
-		Size = UDim2.new(1, 0, 0, 10),
-		Position = UDim2.new(0, 0, 1, -10),
-		BackgroundColor3 = COLORS.CardHeaderBg,
-	}, headerBar)
-
-	local headerPadding = Instance.new("UIPadding")
-	headerPadding.PaddingLeft = UDim.new(0, 16)
-	headerPadding.PaddingRight = UDim.new(0, 16)
-	headerPadding.Parent = headerBar
-
-	createIcon({
-		Size = UDim2.new(0, 16, 0, 16),
-		Position = UDim2.new(0, 0, 0.5, 0),
-		AnchorPoint = Vector2.new(0, 0.5),
-		AssetId = props.IconAsset,
-		FallbackText = props.Icon or "⚙️",
-		TextSize = 13,
-		ImageColor3 = COLORS.CardHeader,
-	}, headerBar)
-
-	newLabel({
-		Size = UDim2.new(1, -24, 1, 0),
-		Position = UDim2.new(0, 22, 0, 0),
-		Text = props.Title,
-		Font = Enum.Font.GothamBold,
-		TextColor3 = COLORS.CardHeader,
-		TextSize = 11,
-	}, headerBar)
-
-	-- Corpo: PaddingTop reduzido pra não sobrar espaço vazio logo abaixo do header
-	local body = newFrame({
-		Name = "Body",
-		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundTransparency = 1,
-	}, card)
-	body.AutomaticSize = Enum.AutomaticSize.Y
-	body.LayoutOrder = 2
-
-	local bodyLayout = Instance.new("UIListLayout")
-	bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	bodyLayout.Padding = UDim.new(0, 4)
-	bodyLayout.Parent = body
-
-	local bodyPadding = Instance.new("UIPadding")
-	bodyPadding.PaddingLeft = UDim.new(0, 16)
-	bodyPadding.PaddingRight = UDim.new(0, 16)
-	bodyPadding.PaddingTop = UDim.new(0, 4)
-	bodyPadding.PaddingBottom = UDim.new(0, 14)
-	bodyPadding.Parent = body
-
-	return card, body
-end
-
-local function setToggleState(toggleBg, knob, isOn)
-	local targetPos = isOn and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
-	local targetBgColor = isOn and COLORS.ToggleOn or COLORS.ToggleOff
-	-- Track ligado agora é branco, então o knob precisa ficar escuro nesse estado
-	-- (senão um círculo quase-branco some dentro de um fundo branco).
-	local targetKnobColor = isOn and COLORS.AccentDark or COLORS.Knob
-	TweenService:Create(knob, TweenInfo.new(0.15), {Position = targetPos, BackgroundColor3 = targetKnobColor}):Play()
-	TweenService:Create(toggleBg, TweenInfo.new(0.15), {BackgroundColor3 = targetBgColor}):Play()
-end
-
--- Função nomeada: adiciona uma linha de toggle. onChanged(isOn) roda a cada mudança
--- (clique ou setState programático), alimentando o HubState em tempo real.
-local function addToggleRow(card, title, description, defaultOn, onChanged)
-	local row = newFrame({
-		Size = UDim2.new(1, 0, 0, 46),
-		BackgroundTransparency = 1,
-		LayoutOrder = nextRowOrder(),
-	}, card)
-
-	newLabel({
-		Size = UDim2.new(0.75, 0, 0, 15),
-		Text = title,
-		Font = Enum.Font.GothamBold,
-		TextSize = 12,
-	}, row)
-
-	newLabel({
-		Size = UDim2.new(0.75, 0, 0, 13),
-		Position = UDim2.new(0, 0, 0, 17),
-		Text = description,
-		TextColor3 = COLORS.TextMuted,
-		TextSize = 10,
-	}, row)
-
-	local toggleBg = newFrame({
-		Name = "ToggleBg",
-		Size = UDim2.new(0, 40, 0, 20),
-		Position = UDim2.new(1, -40, 0.5, 0),
-		AnchorPoint = Vector2.new(0, 0.5),
-		BackgroundColor3 = defaultOn and COLORS.ToggleOn or COLORS.ToggleOff,
-		Corner = 10,
-	}, row)
-
-	local knob = newFrame({
-		Name = "Knob",
-		Size = UDim2.new(0, 16, 0, 16),
-		Position = defaultOn and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
-		AnchorPoint = Vector2.new(0, 0.5),
-		BackgroundColor3 = defaultOn and COLORS.AccentDark or COLORS.Knob,
-		Corner = 8,
-	}, toggleBg)
-
-	local clickCatcher = Instance.new("TextButton")
-	clickCatcher.Name = "ToggleClickCatcher"
-	clickCatcher.BackgroundTransparency = 1
-	clickCatcher.Size = UDim2.new(1, 0, 1, 0)
-	clickCatcher.Text = ""
-	clickCatcher.Parent = toggleBg
-
-	local isOn = defaultOn
-
-	local function setState(value)
-		isOn = value
-		setToggleState(toggleBg, knob, isOn)
-		if onChanged then
-			onChanged(isOn)
+		local currentValue = snap(saved(flag, o.Default or min))
+		initFlag(flag, currentValue)
+		local fillTween, knobTween
+
+		local function render(animate)
+			local ratio = (currentValue - min) / (max - min)
+			valueLabel.Text = tostring(currentValue) .. suffix
+			if fillTween then fillTween:Cancel() end
+			if knobTween then knobTween:Cancel() end
+			if animate then
+				local info = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+				fillTween = TweenService:Create(fill, info, {Size = UDim2.new(ratio, 0, 1, 0)})
+				knobTween = TweenService:Create(knob, info, {Position = UDim2.new(ratio, 0, 0.5, 0)})
+				fillTween:Play()
+				knobTween:Play()
+			else
+				fill.Size = UDim2.new(ratio, 0, 1, 0)
+				knob.Position = UDim2.new(ratio, 0, 0.5, 0)
+			end
 		end
+
+		local isDragging = false
+
+		local function updateFromInput(input)
+			local ratio = math.clamp((input.Position.X - sliderTrack.AbsolutePosition.X) / sliderTrack.AbsoluteSize.X, 0, 1)
+			local newValue = snap(min + (max - min) * ratio)
+			if newValue ~= currentValue then
+				currentValue = newValue
+				render(true)
+				setFlag(flag, currentValue)
+				fire(o.Callback, currentValue, false)
+			end
+		end
+
+		dragCatcher.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				closeAnyOpenDropdown()
+				isDragging = true
+				updateFromInput(input)
+			end
+		end)
+
+		-- Movimento e soltar são globais: soltar o mouse fora da barrinha também encerra o arraste.
+		track(UserInputService.InputChanged:Connect(function(input)
+			if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				updateFromInput(input)
+			end
+		end))
+		track(UserInputService.InputEnded:Connect(function(input)
+			if isDragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				isDragging = false
+				fire(o.Callback, currentValue, true)
+			end
+		end))
+
+		render(false)
+		addDivider(row)
+
+		local api = {Row = row}
+		function api:Get() return currentValue end
+		function api:Set(value)
+			currentValue = snap(value)
+			render(false)
+			setFlag(flag, currentValue)
+			fire(o.Callback, currentValue, true)
+		end
+
+		if o.CallOnLoad then fire(o.Callback, currentValue, true) end
+		return api
 	end
 
-	local function onToggleClicked()
-		setState(not isOn)
+	-- ---------- KEYBIND ----------
+	-- Registro ÚNICO de atalhos: os elementos AddKeybind e os atalhos criados por código
+	-- (Window:RegisterKeybind) vivem na mesma tabela, então aparecem juntos na lista Ctrl+B
+	-- e compartilham a checagem de conflito.
+	-- id -> {key, onPressed, onChanged, enabled, name, flag, refresh, custom}
+	local keybinds = {}
+	local keybindCounter = 0
+	local isAnyKeybindListening = false
+	local keybindCooldownUntil = 0
+	local refreshKeybindViewer -- definido junto do visualizador (mais abaixo)
+	local toggleKeybindViewer  -- idem; só existe se KeybindViewer ~= false
+
+	-- Aceita KeyCode ou nome ("F", "RightShift"); devolve nil se for inválido.
+	local function toKeyCode(key)
+		if typeof(key) == "EnumItem" then return key end
+		if type(key) == "string" then return keyCodeFromName(key, nil) end
+		return nil
 	end
-	clickCatcher.MouseButton1Click:Connect(onToggleClicked)
 
-	addRowDivider(row)
-
-	if onChanged then
-		onChanged(isOn)
+	-- Procura por id/flag (elementos) ou pelo nome usado em RegisterKeybind.
+	local function findKeybind(nameOrId)
+		if keybinds[nameOrId] then return keybinds[nameOrId], nameOrId end
+		local customId = "Custom." .. tostring(nameOrId)
+		if keybinds[customId] then return keybinds[customId], customId end
+		return nil, nil
 	end
 
-	local function getToggleState()
-		return isOn
+	local function keyDisplayName(keyCode)
+		return keyCode == Enum.KeyCode.Unknown and "None" or keyCode.Name
 	end
 
-	return row, getToggleState, setState
-end
-
--- ================== COLUNA ESQUERDA: STORY + CHALLENGE + MACRO ==================
-local leftCol = newFrame({
-	Name = "LeftColumn",
-	Size = UDim2.new(0.5, -6, 0, 0),
-	Position = UDim2.new(0, 0, 0, 0),
-	BackgroundTransparency = 1,
-}, content)
-leftCol.AutomaticSize = Enum.AutomaticSize.Y
-local leftLayout = Instance.new("UIListLayout")
-leftLayout.SortOrder = Enum.SortOrder.LayoutOrder
-leftLayout.Padding = UDim.new(0, 10)
-leftLayout.Parent = leftCol
-
-local storyCard, storyBody = createCard({
-	Name = "StoryCard", IconAsset = ASSETS.IconStory, Icon = "⚙️",
-	Title = "STORY", Size = UDim2.new(1, 0, 0, 0),
-}, leftCol)
-storyCard.LayoutOrder = 1
-
-local storyMapOptions = {"SchoolGrounds", "SpiritCity", "BeachTown"}
-addDropdownRow(storyBody, "Map", "Selects the Story...", storyMapOptions,
-	findOptionIndex(storyMapOptions, savedOrDefault("Story", "Map", nil), 1),
-	function(value)
-		HubState.Story.Map = value
-		markConfigDirty()
-	end)
-
-local storyStageOptions = {"Act 1", "Act 2", "Act 3"}
-addDropdownRow(storyBody, "Stage", "Selects the act...", storyStageOptions,
-	findOptionIndex(storyStageOptions, savedOrDefault("Story", "Stage", nil), 1),
-	function(value)
-		HubState.Story.Stage = value
-		markConfigDirty()
-	end)
-
-local storyDifficultyOptions = {"Easy", "Normal", "Hard"}
-addDropdownRow(storyBody, "Difficulty", "Selects the stage...", storyDifficultyOptions,
-	findOptionIndex(storyDifficultyOptions, savedOrDefault("Story", "Difficulty", nil), 2),
-	function(value)
-		HubState.Story.Difficulty = value
-		markConfigDirty()
-	end)
-
-addToggleRow(storyBody, "Auto Join Story", "Queues this stage from the lobby...",
-	savedOrDefault("Story", "AutoJoin", false),
-	function(isOn)
-		HubState.Story.AutoJoin = isOn
-		markConfigDirty()
-		showNotification("Auto Join Story", isOn and "Ativado" or "Desativado", isOn and "success" or "info")
-	end)
-
-local challengeCard, challengeBody = createCard({
-	Name = "ChallengeCard", IconAsset = ASSETS.IconChallenge, Icon = "⚙️",
-	Title = "CHALLENGE", Size = UDim2.new(1, 0, 0, 0),
-}, leftCol)
-challengeCard.LayoutOrder = 2
-
-local challengeTypeOptions = {"Regular", "Elite", "Boss Rush"}
-addDropdownRow(challengeBody, "Challenge Type", "Selects the current...", challengeTypeOptions,
-	findOptionIndex(challengeTypeOptions, savedOrDefault("Challenge", "Type", nil), 1),
-	function(value)
-		HubState.Challenge.Type = value
-		markConfigDirty()
-	end)
-
-local challengeStageOptions = {
-	"1 - Regular Challenge #1 / 3",
-	"2 - Regular Challenge #2 / 3",
-	"3 - Regular Challenge #3 / 3",
-}
-addDropdownRow(challengeBody, "Available Stage", "Selects one live...", challengeStageOptions,
-	findOptionIndex(challengeStageOptions, savedOrDefault("Challenge", "Stage", nil), 1),
-	function(value)
-		HubState.Challenge.Stage = value
-		markConfigDirty()
-	end)
-
-addToggleRow(challengeBody, "Auto Join Challenge", "Queues the selected challenge...",
-	savedOrDefault("Challenge", "AutoJoin", false),
-	function(isOn)
-		HubState.Challenge.AutoJoin = isOn
-		markConfigDirty()
-		showNotification("Auto Join Challenge", isOn and "Ativado" or "Desativado", isOn and "success" or "info")
-	end)
-
-local macroCard, macroBody = createCard({
-	Name = "MacroCard", IconAsset = ASSETS.IconMacro, Icon = "🧩",
-	Title = "MACRO", Size = UDim2.new(1, 0, 0, 0),
-}, leftCol)
-macroCard.LayoutOrder = 3
-addSliderRow(macroBody, "Macro Speed", "Ajusta a velocidade de reprodução...", 1, 5,
-	savedOrDefault("Macro", "Speed", 1), "x",
-	function(value)
-		HubState.Macro.Speed = value
-		markConfigDirty()
-	end)
-
--- Toggle real de "Macro Enabled" — antes o keybind "Toggle Macro" só dava print,
--- agora ele liga/desliga esse toggle de verdade (via setMacroEnabled abaixo).
-local macroToggleRow, getMacroEnabled, setMacroEnabled = addToggleRow(
-	macroBody, "Macro Enabled", "Liga/desliga o macro (via botão ou tecla)...",
-	savedOrDefault("Macro", "Enabled", false),
-	function(isOn)
-		HubState.Macro.Enabled = isOn
-		markConfigDirty()
-		showNotification("Macro", isOn and "Ativado" or "Desativado", isOn and "success" or "info")
+	-- Troca a tecla de um atalho: atualiza o botão, a flag (salva no arquivo), a lista Ctrl+B
+	-- e dispara OnChanged (a não ser que silent).
+	local function applyKeybindKey(id, keyCode, silent)
+		local kb = keybinds[id]
+		if not kb or typeof(keyCode) ~= "EnumItem" then return false end
+		kb.key = keyCode
+		if kb.flag then setFlag(kb.flag, keyCode.Name) end
+		if kb.refresh then kb.refresh() end
+		if refreshKeybindViewer then refreshKeybindViewer() end
+		if not silent then fire(kb.onChanged, keyCode) end
+		return true
 	end
-)
 
-local function onToggleMacroKeybindPressed()
-	setMacroEnabled(not getMacroEnabled())
-end
-addKeybindRow(macroBody, "Toggle Macro", "Liga/desliga o macro pela tecla...", Enum.KeyCode.RightShift, onToggleMacroKeybindPressed)
+	-- Um único handler global despacha todos os atalhos (e o Esc fecha dropdowns).
+	track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 
--- ================== COLUNA DIREITA: RAID + HOTKEYS + QUEUE STATUS ==================
-local rightCol = newFrame({
-	Name = "RightColumn",
-	Size = UDim2.new(0.5, -6, 0, 0),
-	Position = UDim2.new(0.5, 6, 0, 0),
-	BackgroundTransparency = 1,
-}, content)
-rightCol.AutomaticSize = Enum.AutomaticSize.Y
-local rightLayout = Instance.new("UIListLayout")
-rightLayout.SortOrder = Enum.SortOrder.LayoutOrder
-rightLayout.Padding = UDim.new(0, 10)
-rightLayout.Parent = rightCol
+		-- Ctrl+B abre/fecha a lista de atalhos
+		if input.KeyCode == Enum.KeyCode.B and not gameProcessed
+			and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+			if toggleKeybindViewer then
+				toggleKeybindViewer()
+				return
+			end
+		end
 
-local raidCard, raidBody = createCard({
-	Name = "RaidCard", IconAsset = ASSETS.IconRaid, Icon = "⚙️",
-	Title = "RAID", Size = UDim2.new(1, 0, 0, 0),
-}, rightCol)
-raidCard.LayoutOrder = 1
+		if gameProcessed then return end
+		if input.KeyCode == Enum.KeyCode.Escape and closeOpenDropdown then
+			closeAnyOpenDropdown()
+			return
+		end
+		if isAnyKeybindListening or os.clock() < keybindCooldownUntil then return end
+		-- não dispara atalhos enquanto o usuário digita num TextBox
+		if UserInputService:GetFocusedTextBox() then return end
 
-local raidMapOptions = {"SpiritCity", "SchoolGrounds", "VoidRealm"}
-addDropdownRow(raidBody, "Map", "Selects the Raid...", raidMapOptions,
-	findOptionIndex(raidMapOptions, savedOrDefault("Raid", "Map", nil), 1),
-	function(value)
-		HubState.Raid.Map = value
-		markConfigDirty()
-	end)
+		for _, kb in pairs(keybinds) do
+			if kb.enabled ~= false and kb.key == input.KeyCode and kb.onPressed then
+				fire(kb.onPressed)
+			end
+		end
+	end))
 
-local raidActOptions = {"Act 1", "Act 2", "Act 3"}
-addDropdownRow(raidBody, "Act", "Selects the act...", raidActOptions,
-	findOptionIndex(raidActOptions, savedOrDefault("Raid", "Act", nil), 1),
-	function(value)
-		HubState.Raid.Act = value
-		markConfigDirty()
-	end)
+	local function addKeybind(body, entry, o)
+		local rowTitle, description = o.Title or "Keybind", o.Description or ""
+		keybindCounter = keybindCounter + 1
+		local id = o.Flag or ("Keybind" .. keybindCounter)
 
-local raidDifficultyOptions = {"Easy", "Normal", "Hard"}
-addDropdownRow(raidBody, "Difficulty", "Selects the stage...", raidDifficultyOptions,
-	findOptionIndex(raidDifficultyOptions, savedOrDefault("Raid", "Difficulty", nil), 3),
-	function(value)
-		HubState.Raid.Difficulty = value
-		markConfigDirty()
-	end)
+		local row = newFrame({Name = "KeybindRow", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 0.6)
+		registerRow(entry, row, rowTitle .. " " .. description)
 
-local raidToggleRow, getRaidAutoJoin, setRaidAutoJoin = addToggleRow(
-	raidBody, "Auto Join Raid", "Queues this stage from the lobby...",
-	savedOrDefault("Raid", "AutoJoin", true),
-	function(isOn)
-		HubState.Raid.AutoJoin = isOn
-		markConfigDirty()
-		showNotification("Auto Join Raid", isOn and "Ativado" or "Desativado", isOn and "success" or "info")
+		-- tecla inicial: salva no arquivo > Default > None
+		local startKey = keyCodeFromName(o.Flag and savedFlags[o.Flag], toKeyCode(o.Default) or Enum.KeyCode.Unknown)
+		local kb = {
+			key = startKey,
+			onPressed = o.Callback,   -- roda quando a TECLA É APERTADA
+			onChanged = o.OnChanged,  -- roda quando o usuário TROCA a tecla
+			enabled = true,
+			name = rowTitle,
+			flag = o.Flag,
+		}
+		keybinds[id] = kb
+		initFlag(o.Flag, startKey.Name)
+
+		local keyBtn = newButton({
+			Name = "KeybindButton",
+			Size = UDim2.new(0, 90, 0, 26),
+			Position = UDim2.new(1, -90, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = COLORS.Field,
+			Text = keyDisplayName(startKey),
+			TextSize = 12,
+			Corner = 6,
+		}, row)
+		stroke(keyBtn, COLORS.PanelBorder, 1)
+		addHover(keyBtn, COLORS.Field, COLORS.FieldHover)
+
+		local isListening = false
+		local listenConnection
+		local listenToken
+
+		-- chamado por applyKeybindKey (inclusive via SetKeybindKey / api:Set)
+		kb.refresh = function()
+			if not isListening then
+				keyBtn.Text = keyDisplayName(kb.key)
+			end
+		end
+
+		local function stopListening(newKeyCode)
+			isListening = false
+			isAnyKeybindListening = false
+			keybindCooldownUntil = os.clock() + 0.25 -- evita disparar a ação com a própria tecla recém-atribuída
+			if listenConnection then
+				listenConnection:Disconnect()
+				listenConnection = nil
+			end
+			if newKeyCode then
+				applyKeybindKey(id, newKeyCode)
+			end
+			keyBtn.Text = keyDisplayName(kb.key)
+		end
+
+		local function startListening()
+			if isAnyKeybindListening then return end
+			isListening = true
+			isAnyKeybindListening = true
+			keyBtn.Text = "..."
+
+			local token = {}
+			listenToken = token
+
+			listenConnection = track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
+				if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+				if input.KeyCode == Enum.KeyCode.Escape then
+					stopListening(nil)
+					return
+				end
+				if gameProcessed then return end
+
+				-- conflito com qualquer outro atalho (da UI ou registrado por código)
+				for otherId, other in pairs(keybinds) do
+					if otherId ~= id and other.key == input.KeyCode then
+						showNotification("Atalho em uso",
+							input.KeyCode.Name .. " já está atribuída a \"" .. tostring(other.name or otherId) .. "\".", "error")
+						stopListening(nil)
+						return
+					end
+				end
+				stopListening(input.KeyCode)
+			end))
+
+			-- Cancela sozinho se o usuário desistir.
+			task.delay(8, function()
+				if listenToken == token and isListening then
+					stopListening(nil)
+				end
+			end)
+		end
+
+		keyBtn.MouseButton1Click:Connect(function()
+			if isListening then stopListening(nil) else startListening() end
+		end)
+
+		addDivider(row)
+
+		local api = {Row = row}
+		function api:Get() return kb.key end
+		-- Set aceita KeyCode ou nome ("F"). silent = true não dispara OnChanged.
+		function api:Set(key, silent) return applyKeybindKey(id, toKeyCode(key), silent) end
+		function api:SetEnabled(enabled)
+			kb.enabled = enabled and true or false
+			if refreshKeybindViewer then refreshKeybindViewer() end
+		end
+		function api:IsEnabled() return kb.enabled ~= false end
+		return api
 	end
-)
 
-local hotkeysCard, hotkeysBody = createCard({
-	Name = "HotkeysCard", IconAsset = ASSETS.IconHotkeys, Icon = "⌨️",
-	Title = "HOTKEYS & KEY SYSTEM", Size = UDim2.new(1, 0, 0, 0),
-}, rightCol)
-hotkeysCard.LayoutOrder = 2
+	-- ---------- TOGGLE ----------
+	local function setToggleVisual(toggleBg, knob, isOn)
+		local info = TweenInfo.new(0.15)
+		TweenService:Create(knob, info, {
+			Position = isOn and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+			BackgroundColor3 = isOn and COLORS.AccentDark or COLORS.Knob, -- track branco => knob escuro
+		}):Play()
+		TweenService:Create(toggleBg, info, {BackgroundColor3 = isOn and COLORS.ToggleOn or COLORS.ToggleOff}):Play()
+	end
 
-local function onToggleUiKeybindPressed()
-	mainFrame.Visible = not mainFrame.Visible
-end
-addKeybindRow(hotkeysBody, "Toggle UI", "Mostra/esconde a janela inteira...", TOGGLE_UI_KEYCODE, onToggleUiKeybindPressed)
+	local function addToggle(body, entry, o)
+		local rowTitle, description = o.Title or "Toggle", o.Description or ""
+		local flag = o.Flag
+		local requiresKey = o.RequiresKey and keyEnabled
 
--- Atalho extra: a tecla F alterna o Auto Join Raid de qualquer lugar do hub,
--- reaproveitando o setter retornado pelo toggle (exemplo de keybind ligado a um
--- toggle que já existe, sem duplicar lógica).
-addKeybindRow(hotkeysBody, "Toggle Auto Join Raid", "Liga/desliga o auto join do raid...", Enum.KeyCode.F, function()
-	setRaidAutoJoin(not getRaidAutoJoin())
-end)
+		local row = newFrame({Name = "ToggleRow", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 0.75)
+		registerRow(entry, row, rowTitle .. " " .. description)
 
-local function isKeyValid(keyText)
-	for _, validKey in ipairs(KEY_SYSTEM.ValidKeys) do
-		if keyText == validKey then
+		local isOn = saved(flag, o.Default and true or false)
+		if requiresKey and not keyUnlocked then isOn = false end
+		initFlag(flag, isOn)
+
+		local toggleBg = newFrame({
+			Name = "ToggleBg",
+			Size = UDim2.new(0, 40, 0, 20),
+			Position = UDim2.new(1, -40, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = isOn and COLORS.ToggleOn or COLORS.ToggleOff,
+			Corner = 10,
+		}, row)
+		stroke(toggleBg, COLORS.PanelBorder, 1)
+
+		local knob = newFrame({
+			Name = "Knob",
+			Size = UDim2.new(0, 16, 0, 16),
+			Position = isOn and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = isOn and COLORS.AccentDark or COLORS.Knob,
+			Corner = 8,
+		}, toggleBg)
+
+		local clickCatcher = Instance.new("TextButton")
+		clickCatcher.Name = "ToggleClickCatcher"
+		clickCatcher.BackgroundTransparency = 1
+		clickCatcher.Size = UDim2.new(1, 0, 1, 0)
+		clickCatcher.Text = ""
+		clickCatcher.Parent = toggleBg
+
+		-- Retorna true se o estado foi aplicado.
+		local function setState(value, silent)
+			value = value and true or false
+			if value == isOn then return true end
+			if value and requiresKey and not keyUnlocked then
+				showNotification("Key necessária",
+					"Insira uma key válida para ativar " .. rowTitle .. ".", "error")
+				return false
+			end
+			isOn = value
+			setToggleVisual(toggleBg, knob, isOn)
+			setFlag(flag, isOn)
+			if o.Notify and not silent then
+				showNotification(rowTitle, isOn and "Ativado" or "Desativado", isOn and "success" or "info")
+			end
+			fire(o.Callback, isOn)
 			return true
 		end
-	end
-	return false
-end
 
-local insertKeyStatusRow = newFrame({
-	Size = UDim2.new(1, 0, 0, 16),
-	BackgroundTransparency = 1,
-	LayoutOrder = nextRowOrder(),
-}, hotkeysBody)
+		clickCatcher.MouseButton1Click:Connect(function()
+			setState(not isOn)
+		end)
 
--- Ícone do status da key: decide ImageLabel x fallback com base em ASSETS.IconKeyInvalid
--- (mesma convenção do createChevron) — defina IconKeyValid/IconKeyInvalid juntos.
-local insertKeyStatusIcon = createIcon({
-	Name = "KeyStatusIcon",
-	Size = UDim2.new(0, 12, 0, 12),
-	Position = UDim2.new(0, 0, 0.5, 0),
-	AnchorPoint = Vector2.new(0, 0.5),
-	AssetId = ASSETS.IconKeyInvalid,
-	FallbackText = "",
-	TextSize = 11,
-}, insertKeyStatusRow)
+		if requiresKey then
+			gatedToggles[#gatedToggles + 1] = function()
+				setState(false, true)
+			end
+		end
 
-local insertKeyStatusLabel = newLabel({
-	Size = UDim2.new(1, -18, 1, 0),
-	Position = UDim2.new(0, 18, 0, 0),
-	Text = "",
-	TextSize = 10,
-}, insertKeyStatusRow)
+		addDivider(row)
 
--- Função nomeada: atualiza o ícone (rbxassetid, com fallback ✔/✕) e o texto do status da key
-local function setKeyStatus(isValid)
-	local color = isValid and Color3.fromRGB(90, 210, 130) or Color3.fromRGB(230, 90, 90)
+		local api = {Row = row}
+		function api:Get() return isOn end
+		function api:Set(value, silent) return setState(value, silent) end
 
-	if insertKeyStatusIcon:IsA("ImageLabel") then
-		insertKeyStatusIcon.Image = isValid and ASSETS.IconKeyValid or ASSETS.IconKeyInvalid
-		insertKeyStatusIcon.ImageColor3 = color
-	else
-		insertKeyStatusIcon.Text = isValid and "✔" or "✕"
-		insertKeyStatusIcon.TextColor3 = color
+		if o.CallOnLoad then fire(o.Callback, isOn) end
+		return api
 	end
 
-	insertKeyStatusLabel.Text = isValid and "Key válida" or "Key inválida"
-	insertKeyStatusLabel.TextColor3 = color
-	HubState.KeySystem.Unlocked = isValid or not KEY_SYSTEM.Enabled
-	markConfigDirty()
-end
+	-- ---------- TEXTBOX ----------
+	local function addTextbox(body, entry, o)
+		local rowTitle, description = o.Title or "Input", o.Description or ""
 
-local function onInsertKeySubmitted(text)
-	local valid = isKeyValid(text)
-	setKeyStatus(valid)
-	showNotification("Key System", valid and "Key válida — automação liberada" or "Key inválida", valid and "success" or "error")
-end
-addTextboxRow(hotkeysBody, "Insert Key", "Cole sua key para liberar a automação...", "Sua key aqui...", "Insert", onInsertKeySubmitted)
+		local row = newFrame({Name = "TextboxRow", Size = UDim2.new(1, 0, 0, 66), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 1)
+		registerRow(entry, row, rowTitle .. " " .. description)
 
-local statusCard, statusBody = createCard({
-	Name = "QueueStatusCard", IconAsset = ASSETS.IconQueue, Icon = "🔧",
-	Title = "QUEUE STATUS", Size = UDim2.new(1, 0, 0, 0),
-}, rightCol)
-statusCard.LayoutOrder = 3
+		local inputBox = newFrame({
+			Name = "TextboxField",
+			Size = UDim2.new(1, -84, 0, 28),
+			Position = UDim2.new(0, 0, 0, 34),
+			BackgroundColor3 = COLORS.Field,
+			Corner = 6,
+		}, row)
+		stroke(inputBox, COLORS.PanelBorder, 1)
 
-rowOrder = nextRowOrder()
-local statusRow = newFrame({Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, LayoutOrder = rowOrder}, statusBody)
-local statusValueLabel = newLabel({Size = UDim2.new(1, 0, 1, 0), Text = "Status: Idle", Font = Enum.Font.GothamBold, TextSize = 12}, statusRow)
+		local textBox = Instance.new("TextBox")
+		textBox.Name = "Input"
+		textBox.BackgroundTransparency = 1
+		textBox.Size = UDim2.new(1, -16, 1, 0)
+		textBox.Position = UDim2.new(0, 8, 0, 0)
+		textBox.FontFace = FONTS.Body
+		textBox.PlaceholderText = o.Placeholder or ""
+		textBox.PlaceholderColor3 = COLORS.TextMuted
+		textBox.Text = o.Default or ""
+		textBox.TextColor3 = COLORS.TextPrimary
+		textBox.TextSize = 13
+		textBox.TextXAlignment = Enum.TextXAlignment.Left
+		textBox.ClearTextOnFocus = false
+		textBox.Parent = inputBox
 
-rowOrder = nextRowOrder()
-newFrame({
-	Size = UDim2.new(1, 0, 0, 1),
-	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-	LayoutOrder = rowOrder,
-	Glow = true,
-	GlowTransparency = 0.35,
-	GlowBlur = UDim.new(0, 6),
-}, statusBody)
+		local actionBtn = newButton({
+			Name = "ActionButton",
+			Size = UDim2.new(0, 76, 0, 28),
+			Position = UDim2.new(1, -76, 0, 34),
+			BackgroundColor3 = COLORS.Accent,
+			Text = o.ButtonText or "OK",
+			Font = Enum.Font.GothamBold,
+			TextColor3 = COLORS.AccentDark,
+			TextSize = 13,
+			Corner = 6,
+		}, row)
+		addHover(actionBtn, COLORS.Accent, Color3.fromRGB(215, 215, 220))
 
-rowOrder = nextRowOrder()
-local statusRow2 = newFrame({Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, LayoutOrder = rowOrder}, statusBody)
-newLabel({
-	Size = UDim2.new(1, 0, 1, 0),
-	Position = UDim2.new(0, 0, 0, 7),
-	Text = "Macro playback and Goal Planner...",
-	TextColor3 = COLORS.TextMuted,
-	TextSize = 10,
-}, statusRow2)
+		actionBtn.MouseButton1Click:Connect(function()
+			fire(o.Callback, textBox.Text)
+		end)
+		textBox.FocusLost:Connect(function(enterPressed)
+			if enterPressed then fire(o.Callback, textBox.Text) end
+		end)
 
--- Função nomeada: reflete no card QUEUE STATUS se alguma automação está ativa,
--- lendo direto do HubState em vez de deixar "Status: Idle" fixo pra sempre.
-local function refreshQueueStatus()
-	local isAnyActive = HubState.Story.AutoJoin or HubState.Challenge.AutoJoin
-		or HubState.Raid.AutoJoin or HubState.Macro.Enabled
-	statusValueLabel.Text = isAnyActive and "Status: Running" or "Status: Idle"
-	statusValueLabel.TextColor3 = isAnyActive and Color3.fromRGB(90, 210, 130) or COLORS.TextPrimary
-end
+		addDivider(row)
 
--- Reconecta os toggles existentes pra também atualizarem o status (sem reescrever
--- os addToggleRow acima): um heartbeat leve de baixa frequência é mais simples e
--- seguro aqui do que encadear callbacks em cascata. O mesmo heartbeat também
--- descarrega o autosave de configuração (ver markConfigDirty/saveConfig).
-local statusUpdateAccumulator = 0
-local configSaveAccumulator = 0
-local function onHeartbeat(deltaTime)
-	statusUpdateAccumulator = statusUpdateAccumulator + deltaTime
-	if statusUpdateAccumulator >= 0.25 then
-		statusUpdateAccumulator = 0
-		refreshQueueStatus()
+		local api = {Row = row, Box = textBox}
+		function api:Get() return textBox.Text end
+		function api:Set(text) textBox.Text = tostring(text or "") end
+		return api
 	end
 
-	if configDirty then
-		configSaveAccumulator = configSaveAccumulator + deltaTime
-		if configSaveAccumulator >= 1 then
-			configSaveAccumulator = 0
-			saveConfig()
+	-- ---------- BOTÃO ----------
+	local function addButton(body, entry, o)
+		local rowTitle, description = o.Title or "Button", o.Description or ""
+
+		local row = newFrame({Name = "ButtonRow", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 0.6)
+		registerRow(entry, row, rowTitle .. " " .. description)
+
+		local btn = newButton({
+			Name = "ActionButton",
+			Size = UDim2.new(0, 90, 0, 26),
+			Position = UDim2.new(1, -90, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = COLORS.Field,
+			Text = o.ButtonText or "Run",
+			TextSize = 12,
+			Corner = 6,
+		}, row)
+		stroke(btn, o.Danger and COLORS.Danger or COLORS.PanelBorder, 1)
+		addHover(btn, COLORS.Field, o.Danger and COLORS.DangerHover or COLORS.FieldHover)
+		btn.MouseButton1Click:Connect(function()
+			fire(o.Callback)
+		end)
+
+		addDivider(row)
+		return {Row = row}
+	end
+
+	-- ---------- LABEL / SEPARATOR ----------
+	local function addLabel(body, entry, o)
+		local height = o.Height or 20
+		local row = newFrame({Name = "LabelRow", Size = UDim2.new(1, 0, 0, height), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		registerRow(entry, row, o.Text or "")
+
+		local label = newLabel({
+			Size = UDim2.new(1, 0, 1, 0),
+			Text = o.Text or "",
+			Font = o.Bold and Enum.Font.GothamBold or nil,
+			TextSize = o.Bold and 13 or 11,
+			TextColor3 = o.Color or (o.Muted and COLORS.TextMuted or COLORS.TextPrimary),
+			TextWrapped = o.Wrap or false,
+			Truncate = not o.Wrap,
+		}, row)
+
+		local api = {Row = row, Label = label}
+		function api:SetText(text) label.Text = tostring(text) end
+		function api:SetColor(color) label.TextColor3 = color end
+		return api
+	end
+
+	local function addSeparator(body)
+		local line = newFrame({Name = "Separator", Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = COLORS.Divider}, body)
+		line.LayoutOrder = nextOrder(body)
+		return {Row = line}
+	end
+
+	-- ---------- KEY INPUT (status + textbox) ----------
+	local function addKeyInput(body, entry, o)
+		local statusRow = newFrame({Name = "KeyStatusRow", Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1}, body)
+		statusRow.LayoutOrder = nextOrder(body)
+		registerRow(entry, statusRow, "key status")
+
+		local statusLabel = newLabel({
+			Size = UDim2.new(1, 0, 1, 0),
+			Text = "",
+			TextSize = 11,
+		}, statusRow)
+
+		-- state: "valid" | "invalid" | "required" | "disabled"
+		local function setKeyStatus(state)
+			local color, text
+			if state == "valid" then
+				color, text = COLORS.Success, "✔ Key válida"
+			elseif state == "invalid" then
+				color, text = COLORS.Danger, "✕ Key inválida"
+			elseif state == "required" then
+				color, text = COLORS.TextMuted, "• Key necessária para ativar as automações"
+			else
+				color, text = COLORS.TextMuted, "• Key system desativado"
+			end
+			statusLabel.Text = text
+			statusLabel.TextColor3 = color
+		end
+
+		local function onSubmitted(text)
+			local key = trim(text)
+			if key == "" then
+				showNotification("Key System", "Digite uma key.", "error")
+				return
+			end
+			local valid = isKeyValid(key)
+			keyValue = valid and key or ""
+			setKeyUnlocked(valid)
+			setKeyStatus(valid and "valid" or "invalid")
+			setFlag("KeySystem.Unlocked", keyUnlocked)
+			showNotification("Key System",
+				valid and "Key válida — automação liberada." or "Key inválida.", valid and "success" or "error")
+			fire(o.Callback, valid)
+		end
+
+		local api = addTextbox(body, entry, {
+			Title = o.Title or "Insert Key",
+			Description = o.Description or "Cole sua key para liberar a automação.",
+			Placeholder = o.Placeholder or "Sua key aqui...",
+			ButtonText = o.ButtonText or "Insert",
+			Callback = onSubmitted,
+		})
+
+		if not keyEnabled then
+			setKeyStatus("disabled")
+		elseif keyUnlocked then
+			api:Set(keyValue)
+			setKeyStatus("valid")
+		else
+			setKeyStatus("required")
+		end
+		return api
+	end
+
+	-- API pública de um card (métodos com ":").
+	local function makeCardApi(body, entry)
+		local api = {}
+		function api:AddToggle(o) return addToggle(body, entry, o or {}) end
+		function api:AddDropdown(o) return addDropdown(body, entry, o or {}) end
+		function api:AddSlider(o) return addSlider(body, entry, o or {}) end
+		function api:AddKeybind(o) return addKeybind(body, entry, o or {}) end
+		function api:AddTextbox(o) return addTextbox(body, entry, o or {}) end
+		function api:AddButton(o) return addButton(body, entry, o or {}) end
+		function api:AddLabel(o) return addLabel(body, entry, o or {}) end
+		function api:AddKeyInput(o) return addKeyInput(body, entry, o or {}) end
+		function api:AddSeparator() return addSeparator(body) end
+		return api
+	end
+
+	-- ================== ROOT ==================
+	screenGui = Instance.new("ScreenGui")
+	screenGui.Name = guiName
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.Parent = opts.Parent or playerGui
+
+	mainFrame = newFrame({
+		Name = "MainFrame",
+		Size = UDim2.new(0, WINDOW_W, 0, WINDOW_H),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = COLORS.Background,
+		Corner = 12,
+	}, screenGui)
+	stroke(mainFrame, COLORS.PanelBorder, 1)
+
+	uiScale = Instance.new("UIScale")
+	uiScale.Parent = mainFrame
+
+	-- Overlay dos dropdowns: filho do mainFrame (herda UIScale e some junto com a janela).
+	-- O "catcher" é gigante e transparente: clicar em qualquer lugar fecha o dropdown aberto.
+	overlay = Instance.new("Frame")
+	overlay.Name = "DropdownOverlay"
+	overlay.BackgroundTransparency = 1
+	overlay.Size = UDim2.new(1, 0, 1, 0)
+	overlay.ZIndex = 200
+	overlay.Parent = mainFrame
+
+	overlayCatcher = Instance.new("TextButton")
+	overlayCatcher.Name = "OverlayBackgroundCatcher"
+	overlayCatcher.BackgroundTransparency = 1
+	overlayCatcher.AnchorPoint = Vector2.new(0.5, 0.5)
+	overlayCatcher.Position = UDim2.new(0.5, 0, 0.5, 0)
+	overlayCatcher.Size = UDim2.new(40, 0, 40, 0)
+	overlayCatcher.Text = ""
+	overlayCatcher.ZIndex = 199
+	overlayCatcher.Visible = false
+	overlayCatcher.Parent = overlay
+	overlayCatcher.MouseButton1Click:Connect(closeAnyOpenDropdown)
+
+	-- Escala automática: a janela nunca passa do tamanho da tela (útil no mobile),
+	-- e o slider "UI Scale" (página Settings) ajusta dentro desse limite.
+	local hasMovedWindow = false
+
+	local function clampCenter(cx, cy)
+		local screen = screenGui.AbsoluteSize
+		local half = mainFrame.AbsoluteSize / 2
+		cx = math.clamp(cx, math.min(half.X, screen.X / 2), math.max(screen.X - half.X, screen.X / 2))
+		cy = math.clamp(cy, math.min(half.Y, screen.Y / 2), math.max(screen.Y - half.Y, screen.Y / 2))
+		return cx, cy
+	end
+
+	local function clampWindow()
+		if not hasMovedWindow then return end
+		local center = mainFrame.AbsolutePosition + mainFrame.AbsoluteSize / 2 - screenGui.AbsolutePosition
+		local cx, cy = clampCenter(center.X, center.Y)
+		mainFrame.Position = UDim2.fromOffset(cx, cy)
+	end
+
+	applyScale = function()
+		local screen = screenGui.AbsoluteSize
+		if screen.X <= 0 or screen.Y <= 0 then return end
+		local percent = Window.Flags["Settings.UIScale"] or savedFlags["Settings.UIScale"] or 100
+		if type(percent) ~= "number" then percent = 100 end
+		local fitMax = math.min((screen.X - 20) / WINDOW_W, (screen.Y - 20) / WINDOW_H)
+		uiScale.Scale = math.clamp(math.min(fitMax, percent / 100), 0.4, 1.5)
+		clampWindow()
+	end
+	track(screenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		closeAnyOpenDropdown()
+		applyScale()
+	end))
+
+	-- ================== NOTIFICAÇÕES (TOAST) ==================
+	local notificationContainer = newFrame({
+		Name = "NotificationContainer",
+		Size = UDim2.new(0, 260, 1, -20),
+		Position = UDim2.new(1, -14, 1, -14),
+		AnchorPoint = Vector2.new(1, 1),
+		BackgroundTransparency = 1,
+	}, screenGui)
+	notificationContainer.ZIndex = 300
+
+	local notifLayout = Instance.new("UIListLayout")
+	notifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	notifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	notifLayout.Padding = UDim.new(0, 8)
+	notifLayout.Parent = notificationContainer
+
+	local notifOrder = 0
+	local activeToasts = {}
+
+	showNotification = function(toastTitle, message, kind)
+		-- Com notificações desligadas, só erros aparecem.
+		if not notificationsEnabled() and kind ~= "error" then return end
+
+		local accentColor = COLORS.Accent
+		if kind == "success" then
+			accentColor = COLORS.Success
+		elseif kind == "error" then
+			accentColor = COLORS.Danger
+		end
+
+		notifOrder = notifOrder + 1
+
+		local notifCanvas = Instance.new("CanvasGroup")
+		notifCanvas.Name = "Notification"
+		notifCanvas.BackgroundTransparency = 1
+		notifCanvas.Size = UDim2.new(1, 0, 0, 0)
+		notifCanvas.AutomaticSize = Enum.AutomaticSize.Y
+		notifCanvas.LayoutOrder = notifOrder
+		notifCanvas.GroupTransparency = 1
+		notifCanvas.ZIndex = 300
+		notifCanvas.Parent = notificationContainer
+
+		local card = newFrame({
+			Name = "NotifCard",
+			Size = UDim2.new(1, 0, 0, 0),
+			BackgroundColor3 = COLORS.Card,
+			Corner = 8,
+		}, notifCanvas)
+		card.AutomaticSize = Enum.AutomaticSize.Y
+		card.ZIndex = 300
+		stroke(card, COLORS.PanelBorder, 1)
+
+		newFrame({
+			Name = "AccentBar",
+			Size = UDim2.new(0, 3, 1, 0),
+			BackgroundColor3 = accentColor,
+		}, card).ZIndex = 300
+
+		local textHolder = newFrame({
+			Name = "TextHolder",
+			Size = UDim2.new(1, -15, 0, 0),
+			Position = UDim2.new(0, 12, 0, 0),
+			BackgroundTransparency = 1,
+		}, card)
+		textHolder.AutomaticSize = Enum.AutomaticSize.Y
+		textHolder.ZIndex = 300
+
+		local textLayout = Instance.new("UIListLayout")
+		textLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		textLayout.Padding = UDim.new(0, 2)
+		textLayout.Parent = textHolder
+
+		local textPad = Instance.new("UIPadding")
+		textPad.PaddingTop = UDim.new(0, 8)
+		textPad.PaddingBottom = UDim.new(0, 8)
+		textPad.PaddingRight = UDim.new(0, 8)
+		textPad.Parent = textHolder
+
+		local titleLabel = newLabel({
+			Size = UDim2.new(1, 0, 0, 15),
+			Text = tostring(toastTitle or ""),
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+		}, textHolder)
+		titleLabel.ZIndex = 300
+
+		if message and message ~= "" then
+			local messageLabel = newLabel({
+				Size = UDim2.new(1, 0, 0, 0),
+				Text = tostring(message),
+				TextColor3 = COLORS.TextMuted,
+				TextSize = 11,
+				TextWrapped = true,
+			}, textHolder)
+			messageLabel.AutomaticSize = Enum.AutomaticSize.Y
+			messageLabel.ZIndex = 300
+		end
+
+		TweenService:Create(notifCanvas,
+			TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {GroupTransparency = 0}):Play()
+
+		local dismissed = false
+		local function dismiss()
+			if dismissed then return end
+			dismissed = true
+			local idx = table.find(activeToasts, dismiss)
+			if idx then table.remove(activeToasts, idx) end
+
+			local fadeOut = TweenService:Create(notifCanvas,
+				TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {GroupTransparency = 1})
+			fadeOut.Completed:Once(function()
+				notifCanvas:Destroy()
+			end)
+			fadeOut:Play()
+		end
+
+		activeToasts[#activeToasts + 1] = dismiss
+		-- Limita a pilha: toasts antigos somem quando passa do máximo.
+		if #activeToasts > MAX_TOASTS then
+			activeToasts[1]()
+		end
+		task.delay(3, dismiss)
+	end
+
+	-- ================== MOSTRAR / ESCONDER JANELA ==================
+	-- Botão flutuante pra reabrir a janela (essencial no mobile, sem tecla de atalho).
+	local restoreBtn = newButton({
+		Name = "RestoreBtn",
+		Size = UDim2.new(0, 40, 0, 40),
+		Position = UDim2.new(0, 14, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		BackgroundColor3 = COLORS.Panel,
+		Text = "",
+		Corner = 20,
+	}, screenGui)
+	stroke(restoreBtn, COLORS.PanelBorder, 1)
+	restoreBtn.Visible = false
+	restoreBtn.ZIndex = 250
+	addHover(restoreBtn, COLORS.Panel, COLORS.FieldHover)
+	createIcon({
+		Name = "RestoreIcon",
+		Size = UDim2.new(0, 30, 0, 30),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		AssetId = opts.Logo,
+		FallbackText = opts.LogoFallback or "◆",
+		TextSize = 16,
+	}, restoreBtn).ZIndex = 251
+
+	setUiVisible = function(visible)
+		closeAnyOpenDropdown()
+		mainFrame.Visible = visible
+		restoreBtn.Visible = not visible
+	end
+	restoreBtn.MouseButton1Click:Connect(function()
+		setUiVisible(true)
+	end)
+
+	-- Atalho embutido de mostrar/esconder a janela (a página Settings permite rebindar).
+	local toggleDefault = opts.ToggleKey or Enum.KeyCode.Insert
+	do
+		local toggleKey = keyCodeFromName(savedFlags["Window.Toggle"], toggleDefault)
+		keybinds["Window.Toggle"] = {
+			key = toggleKey,
+			onPressed = function() setUiVisible(not mainFrame.Visible) end,
+			enabled = true,
+			name = "Toggle UI",
+			flag = "Window.Toggle",
+		}
+		initFlag("Window.Toggle", toggleKey.Name)
+	end
+
+	-- ================== UNLOAD ==================
+	local function unload()
+		if unloaded then return end
+		unloaded = true
+		closeAnyOpenDropdown()
+		if configDirty then saveConfig() end
+		for _, connection in ipairs(connections) do
+			pcall(function() connection:Disconnect() end)
+		end
+		table.clear(connections)
+		changedEvent:Destroy()
+		if screenGui then screenGui:Destroy() end
+		if env.__NervLibWindows and env.__NervLibWindows[windowId] == Window then
+			env.__NervLibWindows[windowId] = nil
 		end
 	end
-end
-RunService.Heartbeat:Connect(onHeartbeat)
 
-local rightDivider = newFrame({
-	Name = "RightDivider",
-	Size = UDim2.new(0, 1, 1, -24),
-	Position = UDim2.new(0, 0, 0.5, 0),
-	AnchorPoint = Vector2.new(0, 0.5),
-	BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-	Glow = true,
-	GlowTransparency = 0.35,
-	GlowBlur = UDim.new(0, 6),
-}, rightContainer)
+	-- Fade out -> troca no meio -> fade in. Trava durante a animação.
+	local isSwitching = false
+	local function fadeSwitch(canvasGroup, onMidpoint)
+		if isSwitching then return end
+		isSwitching = true
+		local half = FADE_SPEED / 2
 
--- Estado inicial da página ativa (Automation + Auto Join = conteúdo real visível)
-updateActivePage()
-
--- Função nomeada: avisa se a configuração salva anteriormente foi restaurada,
--- fechando o ciclo entre loadConfig() (lido no topo do script) e a UI já em tela.
-local function onUiLoaded()
-	print("[NERV] UI de Automação carregada (versão compacta).")
-	local hasSavedConfig = next(SavedConfig) ~= nil
-	if hasSavedConfig then
-		showNotification("NERV", "Configuração anterior restaurada.", "info")
-	else
-		showNotification("NERV", "Hub carregado.", "info")
+		local fadeOut = TweenService:Create(canvasGroup,
+			TweenInfo.new(half, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {GroupTransparency = 1})
+		fadeOut.Completed:Once(function()
+			if onMidpoint then onMidpoint() end
+			local fadeIn = TweenService:Create(canvasGroup,
+				TweenInfo.new(half, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {GroupTransparency = 0})
+			fadeIn.Completed:Once(function()
+				isSwitching = false
+			end)
+			fadeIn:Play()
+		end)
+		fadeOut:Play()
 	end
+
+	-- ================== SIDEBAR ==================
+	local sidebar = newFrame({
+		Name = "Sidebar",
+		Size = UDim2.new(0, 200, 1, 0),
+		BackgroundColor3 = COLORS.Sidebar,
+	}, mainFrame)
+	corner(sidebar, 12)
+	newFrame({
+		Name = "SidebarCornerFix",
+		Size = UDim2.new(0, 12, 1, 0),
+		Position = UDim2.new(1, -12, 0, 0),
+		BackgroundColor3 = COLORS.Sidebar,
+	}, sidebar)
+
+	local logoHolder = newFrame({
+		Name = "LogoHolder",
+		Size = UDim2.new(1, -28, 0, 50),
+		Position = UDim2.new(0, 14, 0, 14),
+		BackgroundTransparency = 1,
+	}, sidebar)
+
+	local logoCircle = newFrame({
+		Name = "LogoCircle",
+		Size = UDim2.new(0, 40, 0, 40),
+		BackgroundColor3 = COLORS.Field,
+		BackgroundTransparency = 1,
+		Corner = 20,
+	}, logoHolder)
+
+	createIcon({
+		Name = "LogoIcon",
+		Size = UDim2.new(0, 60, 0, 60),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		AssetId = opts.Logo,
+		FallbackText = opts.LogoFallback or "◆",
+		TextSize = 18,
+	}, logoCircle)
+
+	newLabel({
+		Name = "Title",
+		Size = UDim2.new(1, -50, 0, 20),
+		Position = UDim2.new(0, 50, 0, subtitle ~= "" and 0 or 10),
+		Text = title,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		Truncate = true,
+	}, logoHolder)
+
+	if subtitle ~= "" then
+		newLabel({
+			Name = "Subtitle",
+			Size = UDim2.new(1, -50, 0, 16),
+			Position = UDim2.new(0, 50, 0, 22),
+			Text = subtitle,
+			TextColor3 = COLORS.TextMuted,
+			TextSize = 12,
+			Truncate = true,
+		}, logoHolder)
+	end
+
+	newFrame({
+		Name = "SidebarDivider",
+		Size = UDim2.new(1, -28, 0, 1),
+		Position = UDim2.new(0, 14, 0, 74),
+		BackgroundColor3 = COLORS.Divider,
+	}, sidebar)
+
+	local navList = newFrame({
+		Name = "NavList",
+		Size = UDim2.new(1, -22, 1, -100),
+		Position = UDim2.new(0, 11, 0, 88),
+		BackgroundTransparency = 1,
+	}, sidebar)
+
+	local navLayout = Instance.new("UIListLayout")
+	navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	navLayout.Padding = UDim.new(0, 4)
+	navLayout.Parent = navList
+
+	-- ================== CONTAINER DIREITO ==================
+	local rightContainer = newFrame({
+		Name = "RightContainer",
+		Size = UDim2.new(1, -200, 1, 0),
+		Position = UDim2.new(0, 200, 0, 0),
+		BackgroundTransparency = 1,
+	}, mainFrame)
+
+	-- ================== TOP BAR ==================
+	local topBar = newFrame({
+		Name = "TopBar",
+		Size = UDim2.new(1, -28, 0, 40),
+		Position = UDim2.new(0, 14, 0, 12),
+		BackgroundTransparency = 1,
+	}, rightContainer)
+
+	local pageTitleLabel, pageCounterLabel, searchInput
+
+	do
+		-- Arrastar a janela pela TopBar (com limite: não deixa sair da tela).
+		local isDraggingWindow = false
+		local dragStartInputPos, dragStartCenter
+
+		topBar.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				closeAnyOpenDropdown()
+				isDraggingWindow = true
+				dragStartInputPos = input.Position
+				dragStartCenter = mainFrame.AbsolutePosition + mainFrame.AbsoluteSize / 2 - screenGui.AbsolutePosition
+			end
+		end)
+		track(UserInputService.InputChanged:Connect(function(input)
+			if isDraggingWindow and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				local delta = input.Position - dragStartInputPos
+				local cx, cy = clampCenter(dragStartCenter.X + delta.X, dragStartCenter.Y + delta.Y)
+				hasMovedWindow = true
+				mainFrame.Position = UDim2.fromOffset(cx, cy)
+			end
+		end))
+		track(UserInputService.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				isDraggingWindow = false
+			end
+		end))
+
+		-- Título + contador lado a lado (o contador acompanha a largura do título).
+		local titleHolder = newFrame({
+			Name = "TitleHolder",
+			Size = UDim2.new(0, 0, 1, 0),
+			BackgroundTransparency = 1,
+		}, topBar)
+		titleHolder.AutomaticSize = Enum.AutomaticSize.X
+
+		local titleLayout = Instance.new("UIListLayout")
+		titleLayout.FillDirection = Enum.FillDirection.Horizontal
+		titleLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		titleLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		titleLayout.Padding = UDim.new(0, 10)
+		titleLayout.Parent = titleHolder
+
+		pageTitleLabel = newLabel({
+			Name = "PageTitle",
+			Size = UDim2.new(0, 0, 1, 0),
+			Text = title,
+			Font = Enum.Font.GothamBold,
+			TextSize = 18,
+		}, titleHolder)
+		pageTitleLabel.AutomaticSize = Enum.AutomaticSize.X
+		pageTitleLabel.LayoutOrder = 1
+
+		pageCounterLabel = newLabel({
+			Name = "PageCounter",
+			Size = UDim2.new(0, 0, 1, 0),
+			Text = "",
+			TextColor3 = COLORS.TextMuted,
+			TextSize = 12,
+		}, titleHolder)
+		pageCounterLabel.AutomaticSize = Enum.AutomaticSize.X
+		pageCounterLabel.LayoutOrder = 2
+
+		local searchBox = newFrame({
+			Name = "SearchBox",
+			Size = UDim2.new(0, 180, 0, 28),
+			Position = UDim2.new(1, -260, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = COLORS.Field,
+			Corner = 7,
+		}, topBar)
+
+		createIcon({
+			Name = "SearchIcon",
+			Size = UDim2.new(0, 18, 0, 18),
+			Position = UDim2.new(0, 8, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			AssetId = Library.Icons.Search,
+			FallbackText = "🔍",
+			TextSize = 12,
+			ImageColor3 = COLORS.TextMuted,
+		}, searchBox)
+
+		searchInput = Instance.new("TextBox")
+		searchInput.Name = "SearchInput"
+		searchInput.BackgroundTransparency = 1
+		searchInput.Size = UDim2.new(1, -36, 1, 0)
+		searchInput.Position = UDim2.new(0, 32, 0, 0)
+		searchInput.FontFace = FONTS.Body
+		searchInput.PlaceholderText = "Search"
+		searchInput.PlaceholderColor3 = COLORS.TextMuted
+		searchInput.Text = ""
+		searchInput.TextColor3 = COLORS.TextPrimary
+		searchInput.TextSize = 13
+		searchInput.TextXAlignment = Enum.TextXAlignment.Left
+		searchInput.ClearTextOnFocus = false
+		searchInput.Parent = searchBox
+
+		local minimizeBtn = newButton({
+			Name = "MinimizeBtn",
+			Size = UDim2.new(0, 28, 0, 28),
+			Position = UDim2.new(1, -60, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = COLORS.Field,
+			BackgroundTransparency = 1,
+			Text = "",
+			Corner = 7,
+		}, topBar)
+		createIcon({
+			Name = "MinimizeIcon",
+			Size = UDim2.new(0, 16, 0, 16),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			AssetId = Library.Icons.Minimize,
+			FallbackText = "—",
+			TextSize = 14,
+			ImageColor3 = COLORS.TextPrimary,
+		}, minimizeBtn)
+
+		local closeBtn = newButton({
+			Name = "CloseBtn",
+			Size = UDim2.new(0, 28, 0, 28),
+			Position = UDim2.new(1, -28, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = COLORS.Field,
+			BackgroundTransparency = 1,
+			Text = "",
+			Corner = 7,
+		}, topBar)
+		createIcon({
+			Name = "CloseIcon",
+			Size = UDim2.new(0, 16, 0, 16),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			AssetId = Library.Icons.Close,
+			FallbackText = "✕",
+			TextSize = 14,
+			ImageColor3 = COLORS.TextPrimary,
+		}, closeBtn)
+
+		-- Hover: os botões têm fundo transparente, então o hover anima a transparência.
+		local function addGhostHover(btn, hoverColor)
+			btn.MouseEnter:Connect(function()
+				btn.BackgroundColor3 = hoverColor
+				TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundTransparency = 0}):Play()
+			end)
+			btn.MouseLeave:Connect(function()
+				TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundTransparency = 1}):Play()
+			end)
+		end
+		addGhostHover(minimizeBtn, COLORS.FieldHover)
+		addGhostHover(closeBtn, COLORS.DangerHover)
+
+		minimizeBtn.MouseButton1Click:Connect(function()
+			setUiVisible(false)
+			local keyName = keybinds["Window.Toggle"].key.Name
+			showNotification(title, "UI oculta. Pressione " .. keyName .. " ou toque no botão lateral.", "info")
+		end)
+		closeBtn.MouseButton1Click:Connect(unload)
+	end
+
+	-- ================== TAB BAR ==================
+	local tabBar = newFrame({
+		Name = "TabBar",
+		Size = UDim2.new(1, -28, 0, 28),
+		Position = UDim2.new(0, 14, 0, 58),
+		BackgroundTransparency = 1,
+	}, rightContainer)
+
+	newFrame({
+		Name = "TabBarDivider",
+		Size = UDim2.new(1, -28, 0, 1),
+		Position = UDim2.new(0, 14, 0, 90),
+		BackgroundColor3 = COLORS.Divider,
+	}, rightContainer)
+
+	-- ================== CONTENT ==================
+	contentCanvas = Instance.new("CanvasGroup")
+	contentCanvas.Name = "ContentCanvas"
+	contentCanvas.BackgroundTransparency = 1
+	contentCanvas.Size = UDim2.new(1, -28, 1, -108)
+	contentCanvas.Position = UDim2.new(0, 14, 0, 100)
+	contentCanvas.GroupTransparency = 0
+	contentCanvas.Parent = rightContainer
+
+	-- ScrollingFrame com canvas automático; fecha o dropdown aberto ao rolar
+	-- (a lista fica num overlay e não acompanha o scroll).
+	local function createScroll(name)
+		local scroll = Instance.new("ScrollingFrame")
+		scroll.Name = name
+		scroll.Size = UDim2.new(1, 0, 1, 0)
+		scroll.BackgroundTransparency = 1
+		scroll.BorderSizePixel = 0
+		scroll.ScrollBarThickness = 3
+		scroll.ScrollBarImageColor3 = COLORS.Scroll
+		scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+		scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		scroll.Visible = false
+		scroll.Parent = contentCanvas
+
+		local pad = Instance.new("UIPadding")
+		pad.PaddingRight = UDim.new(0, 8)
+		pad.PaddingBottom = UDim.new(0, 8)
+		pad.Parent = scroll
+
+		scroll:GetPropertyChangedSignal("CanvasPosition"):Connect(closeAnyOpenDropdown)
+		return scroll
+	end
+
+	-- Placeholder: aparece quando a aba/página atual não tem nenhum card.
+	local placeholderPage = newFrame({
+		Name = "PlaceholderPage",
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, contentCanvas)
+
+	local placeholderTitle = newLabel({
+		Name = "PlaceholderTitle",
+		Size = UDim2.new(1, 0, 0, 22),
+		Position = UDim2.new(0, 0, 0, 60),
+		Text = "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	}, placeholderPage)
+
+	newLabel({
+		Name = "PlaceholderSubtitle",
+		Size = UDim2.new(1, 0, 0, 16),
+		Position = UDim2.new(0, 0, 0, 86),
+		Text = "Em construção — em breve.",
+		TextColor3 = COLORS.TextMuted,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	}, placeholderPage)
+
+	local noResultsLabel = newLabel({
+		Name = "NoResults",
+		Size = UDim2.new(1, 0, 0, 20),
+		Position = UDim2.new(0, 0, 0, 40),
+		Text = "Nenhum resultado para a busca.",
+		TextColor3 = COLORS.TextMuted,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	}, contentCanvas)
+	noResultsLabel.Visible = false
+
+	-- ================== PÁGINAS / ABAS / CARDS ==================
+	local pages = Window.Pages
+	local currentPage
+
+	-- Busca: filtra linhas por título/descrição; cards sem nenhum resultado somem
+	-- (se o título do card casar, o card inteiro continua visível). Só vale pra aba atual.
+	applySearch = function()
+		local query = string.lower(trim(searchInput.Text))
+		local tab = currentPage and currentPage.CurrentTab
+		noResultsLabel.Visible = false
+		if not tab then return end
+
+		local anyCardVisible = false
+		for _, entry in ipairs(tab.Cards) do
+			local cardMatches = query == "" or string.find(entry.title, query, 1, true) ~= nil
+			local anyRowVisible = false
+			for _, r in ipairs(entry.rows) do
+				local show = cardMatches or string.find(r.text, query, 1, true) ~= nil
+				r.frame.Visible = show
+				anyRowVisible = anyRowVisible or show
+			end
+			local showCard = cardMatches or anyRowVisible
+			entry.card.Visible = showCard
+			anyCardVisible = anyCardVisible or showCard
+		end
+		noResultsLabel.Visible = query ~= "" and #tab.Cards > 0 and not anyCardVisible
+	end
+	searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+		applySearch()
+	end)
+
+	updateActivePage = function()
+		for _, page in ipairs(pages) do
+			local isCurrent = (page == currentPage)
+			page.TabBarFrame.Visible = isCurrent and #page.Tabs > 1
+			for _, tab in ipairs(page.Tabs) do
+				tab.Scroll.Visible = isCurrent and tab == page.CurrentTab and #tab.Cards > 0
+			end
+		end
+
+		local tab = currentPage and currentPage.CurrentTab
+		placeholderPage.Visible = currentPage ~= nil and (tab == nil or #tab.Cards == 0)
+		placeholderTitle.Text = tab and tab.Name or (currentPage and currentPage.Name or "")
+
+		pageTitleLabel.Text = currentPage and currentPage.Name or title
+		local index = currentPage and table.find(pages, currentPage) or 1
+		pageCounterLabel.Text = string.format("%02d / %02d", index, math.max(#pages, 1))
+
+		applySearch()
+	end
+
+	local function setNavActive(page, active)
+		local nav = page.Nav
+		nav.Button.BackgroundColor3 = active and COLORS.NavActiveBg or COLORS.Sidebar
+		nav.Label.TextColor3 = active and COLORS.Accent or COLORS.TextMuted
+		setIconColor(nav.Icon, active and COLORS.Accent or COLORS.TextMuted)
+		TweenService:Create(nav.Stroke, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{Transparency = active and 0.35 or 1}):Play()
+	end
+
+	local function setCurrentPage(page)
+		currentPage = page
+		for _, p in ipairs(pages) do
+			setNavActive(p, p == page)
+		end
+		updateActivePage()
+	end
+
+	local function styleTabs(page)
+		for _, tab in ipairs(page.Tabs) do
+			local isActive = (tab == page.CurrentTab)
+			tab.Button.TextColor3 = isActive and COLORS.TextPrimary or COLORS.TextMuted
+			tab.Button.FontFace = isActive and FONTS.Title or FONTS.Body
+			tab.Underline.Visible = isActive
+		end
+	end
+
+	local function createCard(tab, co)
+		co = co or {}
+		local cardTitle = tostring(co.Title or "CARD")
+		local useRight = (co.Side == 2 or co.Side == "Right") and tab.Right ~= nil
+		local column = useRight and tab.Right or tab.Left
+
+		local card = newFrame({
+			Name = cardTitle .. "Card",
+			Size = UDim2.new(1, 0, 0, 0),
+			BackgroundColor3 = COLORS.Card,
+			Corner = 10,
+		}, column)
+		card.AutomaticSize = Enum.AutomaticSize.Y
+		stroke(card, COLORS.PanelBorder, 1)
+		tab.CardCount = tab.CardCount + 1
+		card.LayoutOrder = tab.CardCount
+
+		local outerLayout = Instance.new("UIListLayout")
+		outerLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		outerLayout.Parent = card
+
+		local headerBar = newFrame({
+			Name = "HeaderBar",
+			Size = UDim2.new(1, 0, 0, 38),
+			BackgroundColor3 = COLORS.CardHeaderBg,
+			Corner = 10,
+		}, card)
+		headerBar.LayoutOrder = 1
+
+		newFrame({
+			Name = "HeaderBarCornerFix",
+			Size = UDim2.new(1, 0, 0, 10),
+			Position = UDim2.new(0, 0, 1, -10),
+			BackgroundColor3 = COLORS.CardHeaderBg,
+		}, headerBar)
+
+		local headerPadding = Instance.new("UIPadding")
+		headerPadding.PaddingLeft = UDim.new(0, 16)
+		headerPadding.PaddingRight = UDim.new(0, 16)
+		headerPadding.Parent = headerBar
+
+		createIcon({
+			Size = UDim2.new(0, 22, 0, 22),
+			Position = UDim2.new(0, 0, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			AssetId = co.Icon,
+			FallbackText = co.IconFallback or "⚙️",
+			TextSize = 17,
+			ImageColor3 = COLORS.CardHeader,
+		}, headerBar)
+
+		newLabel({
+			Size = UDim2.new(1, -32, 1, 0),
+			Position = UDim2.new(0, 30, 0, 0),
+			Text = cardTitle,
+			Font = Enum.Font.GothamBold,
+			TextColor3 = COLORS.CardHeader,
+			TextSize = 12,
+		}, headerBar)
+
+		local body = newFrame({
+			Name = "Body",
+			Size = UDim2.new(1, 0, 0, 0),
+			BackgroundTransparency = 1,
+		}, card)
+		body.AutomaticSize = Enum.AutomaticSize.Y
+		body.LayoutOrder = 2
+
+		local bodyLayout = Instance.new("UIListLayout")
+		bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		bodyLayout.Padding = UDim.new(0, 4)
+		bodyLayout.Parent = body
+
+		local bodyPadding = Instance.new("UIPadding")
+		bodyPadding.PaddingLeft = UDim.new(0, 16)
+		bodyPadding.PaddingRight = UDim.new(0, 16)
+		bodyPadding.PaddingTop = UDim.new(0, 4)
+		bodyPadding.PaddingBottom = UDim.new(0, 14)
+		bodyPadding.Parent = body
+
+		local entry = {card = card, title = string.lower(cardTitle), rows = {}}
+		tab.Cards[#tab.Cards + 1] = entry
+		updateActivePage()
+
+		local api = makeCardApi(body, entry)
+		api.Frame = card
+		return api
+	end
+
+	local function newTab(page, tabName, columns)
+		local scroll = createScroll(tabName)
+
+		local left = newFrame({
+			Name = "LeftColumn",
+			Size = columns == 1 and UDim2.new(1, 0, 0, 0) or UDim2.new(0.5, -6, 0, 0),
+			BackgroundTransparency = 1,
+		}, scroll)
+		left.AutomaticSize = Enum.AutomaticSize.Y
+		local leftLayout = Instance.new("UIListLayout")
+		leftLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		leftLayout.Padding = UDim.new(0, 10)
+		leftLayout.Parent = left
+
+		local right
+		if columns ~= 1 then
+			right = newFrame({
+				Name = "RightColumn",
+				Size = UDim2.new(0.5, -6, 0, 0),
+				Position = UDim2.new(0.5, 6, 0, 0),
+				BackgroundTransparency = 1,
+			}, scroll)
+			right.AutomaticSize = Enum.AutomaticSize.Y
+			local rightLayout = Instance.new("UIListLayout")
+			rightLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			rightLayout.Padding = UDim.new(0, 10)
+			rightLayout.Parent = right
+		end
+
+		local tab = {
+			Name = tabName,
+			Page = page,
+			Columns = columns,
+			Scroll = scroll,
+			Left = left,
+			Right = right,
+			Cards = {},
+			CardCount = 0,
+		}
+
+		function tab:AddCard(co)
+			return createCard(tab, co)
+		end
+		function tab:Select()
+			page.CurrentTab = tab
+			styleTabs(page)
+			updateActivePage()
+		end
+		return tab
+	end
+
+	function Window:AddPage(po)
+		po = po or {}
+		local page = {
+			Name = tostring(po.Name or "Page"),
+			Columns = po.Columns or 1,
+			Tabs = {},
+			CurrentTab = nil,
+		}
+		pages[#pages + 1] = page
+
+		-- Item da sidebar
+		local navBtn = newButton({
+			Name = page.Name .. "Nav",
+			Size = UDim2.new(1, 0, 0, 40),
+			BackgroundColor3 = COLORS.Sidebar,
+			Text = "",
+			Corner = 10,
+		}, navList)
+		navBtn.LayoutOrder = #pages
+
+		local navStroke = stroke(navBtn, COLORS.Accent, 1)
+		navStroke.Transparency = 1
+
+		local navIcon = createIcon({
+			Size = UDim2.new(0, 24, 0, 24),
+			Position = UDim2.new(0, 10, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			AssetId = po.Icon,
+			FallbackText = po.IconFallback or "•",
+			TextSize = 18,
+			ImageColor3 = COLORS.TextMuted,
+		}, navBtn)
+
+		local navLabel = newLabel({
+			Size = UDim2.new(1, -48, 1, 0),
+			Position = UDim2.new(0, 42, 0, 0),
+			Text = page.Name,
+			Font = Enum.Font.GothamBold,
+			TextColor3 = COLORS.TextMuted,
+			TextSize = 15,
+		}, navBtn)
+
+		page.Nav = {Button = navBtn, Label = navLabel, Icon = navIcon, Stroke = navStroke}
+
+		-- Hover só em itens inativos (o ativo mantém o fundo de destaque).
+		navBtn.MouseEnter:Connect(function()
+			if currentPage ~= page then
+				TweenService:Create(navBtn, TweenInfo.new(0.1), {BackgroundColor3 = COLORS.FieldHover}):Play()
+			end
+		end)
+		navBtn.MouseLeave:Connect(function()
+			if currentPage ~= page then
+				TweenService:Create(navBtn, TweenInfo.new(0.1), {BackgroundColor3 = COLORS.Sidebar}):Play()
+			end
+		end)
+		navBtn.MouseButton1Click:Connect(function()
+			if currentPage == page then return end
+			closeAnyOpenDropdown()
+			fadeSwitch(contentCanvas, function()
+				setCurrentPage(page)
+			end)
+		end)
+
+		-- Barra de abas desta página
+		page.TabBarFrame = newFrame({
+			Name = page.Name .. "TabBar",
+			Size = UDim2.new(1, 0, 1, 0),
+			BackgroundTransparency = 1,
+			Visible = false,
+		}, tabBar)
+		local tabLayout = Instance.new("UIListLayout")
+		tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		tabLayout.FillDirection = Enum.FillDirection.Horizontal
+		tabLayout.Padding = UDim.new(0, 18)
+		tabLayout.Parent = page.TabBarFrame
+
+		function page:AddTab(to)
+			to = to or {}
+			local tabName = tostring(to.Name or ("Tab " .. (#page.Tabs + 1)))
+			local tab = newTab(page, tabName, to.Columns or page.Columns)
+			page.Tabs[#page.Tabs + 1] = tab
+
+			local holder = newFrame({
+				Name = tabName .. "Tab",
+				Size = UDim2.new(0, 0, 1, 0),
+				BackgroundTransparency = 1,
+			}, page.TabBarFrame)
+			holder.AutomaticSize = Enum.AutomaticSize.X
+			holder.LayoutOrder = #page.Tabs
+
+			local btn = Instance.new("TextButton")
+			btn.Name = "TabButton"
+			btn.BackgroundTransparency = 1
+			btn.Size = UDim2.new(0, 0, 1, -4)
+			btn.AutomaticSize = Enum.AutomaticSize.X
+			btn.FontFace = FONTS.Body
+			btn.Text = tabName
+			btn.TextColor3 = COLORS.TextMuted
+			btn.TextSize = 14
+			btn.Parent = holder
+
+			local underline = newFrame({
+				Name = "Underline",
+				Size = UDim2.new(1, 0, 0, 2),
+				Position = UDim2.new(0, 0, 1, -2),
+				BackgroundColor3 = COLORS.Accent,
+				Visible = false,
+			}, holder)
+
+			tab.Button, tab.Underline = btn, underline
+
+			btn.MouseEnter:Connect(function()
+				if page.CurrentTab ~= tab then btn.TextColor3 = COLORS.TextPrimary end
+			end)
+			btn.MouseLeave:Connect(function()
+				if page.CurrentTab ~= tab then btn.TextColor3 = COLORS.TextMuted end
+			end)
+			btn.MouseButton1Click:Connect(function()
+				if page.CurrentTab == tab then return end
+				closeAnyOpenDropdown()
+				fadeSwitch(contentCanvas, function()
+					tab:Select()
+				end)
+			end)
+
+			if not page.CurrentTab then page.CurrentTab = tab end
+			styleTabs(page)
+			updateActivePage()
+			return tab
+		end
+
+		-- Sem abas explícitas, os cards vão pra uma aba padrão (a barra de abas fica oculta).
+		function page:AddCard(co)
+			local tab = page.Tabs[1] or page:AddTab({Name = "Main"})
+			return tab:AddCard(co)
+		end
+
+		function page:Select()
+			setCurrentPage(page)
+		end
+
+		if #pages == 1 then currentPage = page end
+		setNavActive(page, page == currentPage)
+		updateActivePage()
+		return page
+	end
+
+	-- ================== PÁGINA SETTINGS PRONTA ==================
+	function Window:AddSettingsPage(so)
+		so = so or {}
+		local page = Window:AddPage({
+			Name = so.Name or "Settings",
+			Icon = so.Icon,
+			IconFallback = "⚙️",
+			Columns = 1,
+		})
+
+		local ui = page:AddCard({Title = "INTERFACE", IconFallback = "🖥️"})
+		ui:AddToggle({
+			Title = "Notificações",
+			Description = "Mostra avisos no canto da tela (erros sempre aparecem).",
+			Flag = "Settings.Notifications",
+			Default = true,
+			Notify = true,
+		})
+		-- A escala só é aplicada ao soltar o slider (committed); aplicar durante o arraste
+		-- moveria a barrinha debaixo do mouse e causaria tremedeira.
+		ui:AddSlider({
+			Title = "UI Scale",
+			Description = "Tamanho da janela (limitado ao tamanho da tela).",
+			Min = 60, Max = 120, Default = 100, Step = 5, Suffix = "%",
+			Flag = "Settings.UIScale",
+			Callback = function(_, committed)
+				if committed then applyScale() end
+			end,
+		})
+		ui:AddKeybind({
+			Title = "Toggle UI",
+			Description = "Mostra/esconde a janela inteira.",
+			Flag = "Window.Toggle",
+			Default = toggleDefault,
+			Callback = function()
+				setUiVisible(not mainFrame.Visible)
+			end,
+		})
+
+		local data = page:AddCard({Title = "DADOS", IconFallback = "💾"})
+		data:AddButton({
+			Title = "Resetar configuração",
+			Description = "Apaga o arquivo salvo (vale no próximo carregamento).",
+			ButtonText = "Resetar",
+			Danger = true,
+			Callback = function()
+				Window:ResetConfig()
+				showNotification("Configuração", "Arquivo apagado. Recarregue o script para usar os padrões.", "info")
+			end,
+		})
+		data:AddButton({
+			Title = "Descarregar UI",
+			Description = "Fecha a interface e desconecta todos os atalhos.",
+			ButtonText = "Descarregar",
+			Danger = true,
+			Callback = unload,
+		})
+
+		applyScale()
+		return page
+	end
+
+	-- ================== MÉTODOS DA JANELA ==================
+	Window.Unload = unload
+
+	function Window:Notify(toastTitle, message, kind)
+		showNotification(toastTitle, message, kind)
+	end
+
+	function Window:SetVisible(visible)
+		setUiVisible(visible and true or false)
+	end
+
+	function Window:Toggle()
+		setUiVisible(not mainFrame.Visible)
+	end
+
+	function Window:IsUnlocked()
+		return keyUnlocked
+	end
+
+	function Window:SelectPage(page)
+		setCurrentPage(page)
+	end
+
+	function Window:SaveConfig()
+		saveConfig()
+	end
+
+	function Window:ResetConfig()
+		saveDisabled = true
+		configDirty = false
+		pcall(function()
+			if delfile and isfile and isfile(configFile) then
+				delfile(configFile)
+			elseif writefile then
+				writefile(configFile, "{}")
+			end
+		end)
+	end
+
+	-- ================== ATALHOS: API + LISTA (Ctrl+B) ==================
+	local kbViewer = newFrame({
+		Name = "KeybindViewer",
+		Size = UDim2.new(0, 320, 0, 380),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = COLORS.Background,
+		Corner = 14,
+		Visible = false,
+	}, screenGui)
+	kbViewer.ZIndex = 260
+	stroke(kbViewer, COLORS.PanelBorder, 1)
+
+	newLabel({
+		Name = "Title",
+		Size = UDim2.new(1, -56, 0, 40),
+		Position = UDim2.new(0, 16, 0, 0),
+		Text = "Keybind List",
+		Font = Enum.Font.GothamBold,
+		TextSize = 16,
+	}, kbViewer)
+
+	local kbClose = newButton({
+		Name = "Close",
+		Size = UDim2.new(0, 28, 0, 28),
+		Position = UDim2.new(1, -36, 0, 6),
+		BackgroundColor3 = COLORS.Field,
+		Text = "✕",
+		TextSize = 14,
+		TextColor3 = COLORS.TextMuted,
+		Corner = 7,
+	}, kbViewer)
+	addHover(kbClose, COLORS.Field, COLORS.DangerHover)
+
+	newFrame({
+		Name = "Divider",
+		Size = UDim2.new(1, -24, 0, 1),
+		Position = UDim2.new(0, 12, 0, 42),
+		BackgroundColor3 = COLORS.Divider,
+	}, kbViewer)
+
+	local kbList = Instance.new("ScrollingFrame")
+	kbList.Name = "List"
+	kbList.Size = UDim2.new(1, 0, 1, -72)
+	kbList.Position = UDim2.new(0, 0, 0, 50)
+	kbList.BackgroundTransparency = 1
+	kbList.BorderSizePixel = 0
+	kbList.ScrollBarThickness = 3
+	kbList.ScrollBarImageColor3 = COLORS.Scroll
+	kbList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	kbList.CanvasSize = UDim2.new(0, 0, 0, 0)
+	kbList.Parent = kbViewer
+
+	local kbListLayout = Instance.new("UIListLayout")
+	kbListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	kbListLayout.Padding = UDim.new(0, 4)
+	kbListLayout.Parent = kbList
+
+	local kbListPad = Instance.new("UIPadding")
+	kbListPad.PaddingLeft = UDim.new(0, 12)
+	kbListPad.PaddingRight = UDim.new(0, 12)
+	kbListPad.PaddingBottom = UDim.new(0, 6)
+	kbListPad.Parent = kbList
+
+	newLabel({
+		Name = "Hint",
+		Size = UDim2.new(1, -24, 0, 18),
+		Position = UDim2.new(0, 12, 1, -24),
+		Text = "Ctrl+B abre/fecha esta lista",
+		TextColor3 = COLORS.TextMuted,
+		TextSize = 11,
+	}, kbViewer)
+
+	refreshKeybindViewer = function()
+		if not kbViewer.Visible then return end
+		for _, child in ipairs(kbList:GetChildren()) do
+			if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
+		end
+
+		local items = {}
+		for id, kb in pairs(keybinds) do
+			items[#items + 1] = {id = id, kb = kb}
+		end
+		table.sort(items, function(x, y)
+			return string.lower(tostring(x.kb.name or x.id)) < string.lower(tostring(y.kb.name or y.id))
+		end)
+
+		if #items == 0 then
+			newLabel({
+				Name = "Empty",
+				Size = UDim2.new(1, 0, 0, 30),
+				Text = "Nenhum atalho registrado.",
+				TextColor3 = COLORS.TextMuted,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Center,
+			}, kbList)
+			return
+		end
+
+		for i, item in ipairs(items) do
+			local kb = item.kb
+			local on = kb.enabled ~= false
+			local row = newFrame({
+				Name = "Row",
+				Size = UDim2.new(1, 0, 0, 32),
+				BackgroundColor3 = COLORS.Card,
+				Corner = 8,
+			}, kbList)
+			row.LayoutOrder = i
+
+			newLabel({
+				Size = UDim2.new(1, -100, 1, 0),
+				Position = UDim2.new(0, 10, 0, 0),
+				Text = tostring(kb.name or item.id) .. (on and "" or " (off)"),
+				TextColor3 = on and COLORS.TextPrimary or COLORS.TextMuted,
+				TextSize = 12,
+				Truncate = true,
+			}, row)
+
+			local badge = newFrame({
+				Size = UDim2.new(0, 78, 0, 22),
+				Position = UDim2.new(1, -86, 0.5, 0),
+				AnchorPoint = Vector2.new(0, 0.5),
+				BackgroundColor3 = COLORS.Field,
+				Corner = 6,
+			}, row)
+			stroke(badge, COLORS.PanelBorder, 1)
+			newLabel({
+				Size = UDim2.new(1, 0, 1, 0),
+				Text = keyDisplayName(kb.key),
+				TextColor3 = on and COLORS.Accent or COLORS.TextMuted,
+				TextSize = 11,
+				TextXAlignment = Enum.TextXAlignment.Center,
+			}, badge)
+		end
+	end
+
+	local function setKeybindViewerVisible(visible)
+		kbViewer.Visible = visible
+		if visible then refreshKeybindViewer() end
+	end
+	kbClose.MouseButton1Click:Connect(function()
+		setKeybindViewerVisible(false)
+	end)
+
+	-- Ctrl+B só funciona se KeybindViewer ~= false (o dispatcher checa se isto existe).
+	if opts.KeybindViewer ~= false then
+		toggleKeybindViewer = function()
+			setKeybindViewerVisible(not kbViewer.Visible)
+		end
+	end
+
+	function Window:ShowKeybindViewer() setKeybindViewerVisible(true) end
+	function Window:HideKeybindViewer() setKeybindViewerVisible(false) end
+	function Window:ToggleKeybindViewer() setKeybindViewerVisible(not kbViewer.Visible) end
+
+	-- Registra um atalho global por código (sem linha na UI). Aparece na lista Ctrl+B.
+	-- flag (opcional): salva/restaura a tecla no arquivo de config.
+	function Window:RegisterKeybind(name, key, callback, flag)
+		local keyCode = toKeyCode(key)
+		if not keyCode then
+			warn("[NervLib] RegisterKeybind: tecla inválida para '" .. tostring(name) .. "'")
+			return false
+		end
+		keyCode = keyCodeFromName(flag and savedFlags[flag], keyCode)
+		keybinds["Custom." .. tostring(name)] = {
+			key = keyCode,
+			onPressed = callback,
+			enabled = true,
+			name = tostring(name),
+			flag = flag,
+			custom = true,
+		}
+		initFlag(flag, keyCode.Name)
+		if refreshKeybindViewer then refreshKeybindViewer() end
+		return true
+	end
+
+	-- Só remove atalhos criados com RegisterKeybind.
+	function Window:UnregisterKeybind(name)
+		keybinds["Custom." .. tostring(name)] = nil
+		if refreshKeybindViewer then refreshKeybindViewer() end
+	end
+
+	-- name = nome do RegisterKeybind, ou a Flag de um AddKeybind.
+	function Window:SetKeybindEnabled(name, enabled)
+		local kb = findKeybind(name)
+		if not kb then return false end
+		kb.enabled = enabled and true or false
+		if refreshKeybindViewer then refreshKeybindViewer() end
+		return true
+	end
+
+	function Window:SetKeybindKey(name, key, silent)
+		local _, id = findKeybind(name)
+		if not id then return false end
+		return applyKeybindKey(id, toKeyCode(key), silent)
+	end
+
+	-- Troca a tecla de mostrar/esconder a janela (atualiza o botão na página Settings também).
+	function Window:SetToggleKeybind(key, silent)
+		return applyKeybindKey("Window.Toggle", toKeyCode(key), silent)
+	end
+
+	-- id -> {Name, Key, Enabled, Custom}
+	function Window:GetKeybinds()
+		local result = {}
+		for id, kb in pairs(keybinds) do
+			result[id] = {
+				Name = kb.name or id,
+				Key = kb.key,
+				Enabled = kb.enabled ~= false,
+				Custom = kb.custom == true,
+			}
+		end
+		return result
+	end
+
+	-- ================== INICIALIZAÇÃO ==================
+	applyScale()
+	updateActivePage()
+	env.__NervLibWindows[windowId] = Window
+
+	return Window
 end
-onUiLoaded()
+
+return Library
