@@ -25,8 +25,9 @@
 	Window:UnregisterKeybind(name) / SetKeybindEnabled(name, bool) / SetKeybindKey(name, key)
 	Window:GetKeybinds()          -- nome -> {Key, Callback, Enabled}
 	Window:SetToggleKeybind(key)  -- tecla de mostrar/esconder a janela
-	Window:ShowKeybindViewer() / HideKeybindViewer()   -- lista "Keybind List" (também Ctrl+B)
-	CreateWindow({KeybindViewer = false}) desliga o Ctrl+B
+	Window:ShowKeybindViewer() / HideKeybindViewer()   -- painel "Keybind List": fica SEMPRE visível no
+	                                                   -- canto superior direito (arrastável); Ctrl+B esconde/mostra
+	CreateWindow({KeybindViewer = false}) começa com o painel escondido e desliga o Ctrl+B
 	Window.Flags                        -- tabela flag -> valor atual (e o que é salvo no arquivo)
 	Window.Changed                      -- evento (flag, value)
 
@@ -38,7 +39,7 @@
 	Card:AddToggle   {Title, Description, Default, Flag, Callback(on), RequiresKey, Notify}
 	Card:AddDropdown {Title, Description, Options, Default (valor ou índice), Flag, Callback(value, index)}
 	Card:AddSlider   {Title, Description, Min, Max, Default, Step, Suffix, Flag, Callback(value, committed)}
-	Card:AddKeybind  {Title, Description, Default = Enum.KeyCode (padrão E), Flag, Callback(keyCode)}
+	Card:AddKeybind  {Title, Default = Enum.KeyCode (padrão E), Flag, Callback(keyCode)}   -- card idêntico ao do Expensive
 	                 (sistema do Expensive Hub) Callback roda quando a tecla é TROCADA e uma vez ao carregar.
 	                 A ação fica em Window:RegisterKeybind. retorno: Get() / Set(key, noCallback)
 	Card:AddTextbox  {Title, Description, Placeholder, ButtonText, Callback(text)}
@@ -95,6 +96,7 @@ local COLORS = {
 	KeybindViewerRow    = Color3.fromRGB(26, 26, 26),
 	KeybindViewerText   = Color3.fromRGB(235, 235, 235),
 	KeybindViewerSub    = Color3.fromRGB(160, 160, 160),
+	KeybindCard         = Color3.fromRGB(32, 32, 32),
 	ClayShadow          = Color3.fromRGB(4, 4, 4),
 	ClayShadowDeep      = Color3.fromRGB(2, 2, 2),
 }
@@ -562,6 +564,31 @@ local function springBounce(obj, prop, target, overshoot)
 			return false
 		end
 		return true
+	end)
+end
+
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+-- Card sobe `liftPx` pixels com mola ao passar o mouse (igual ao addHoverLift do Expensive Hub).
+local function addHoverLift(frame, liftPx)
+	if IS_MOBILE then return end
+	liftPx = liftPx or 3
+	local origPos = nil
+	local lifting = false
+	frame.MouseEnter:Connect(function()
+		if lifting then return end
+		lifting = true
+		origPos = origPos or frame.Position
+		springAnimate(frame, "Position", UDim2.new(
+			origPos.X.Scale, origPos.X.Offset,
+			origPos.Y.Scale, origPos.Y.Offset - liftPx
+		), 300, 20, 0.8)
+	end)
+	frame.MouseLeave:Connect(function()
+		lifting = false
+		if origPos then
+			springAnimate(frame, "Position", origPos, 260, 22, 1)
+		end
 	end)
 end
 
@@ -1137,34 +1164,70 @@ function Library:CreateWindow(opts)
 		end
 	end))
 
+
+	-- Elemento IDÊNTICO ao CreateKeybind do Expensive Hub: card de 44px (canto 14, sombra clay,
+	-- borda, hover lift) com o nome à esquerda e o botão da tecla à direita.
+	-- (O Expensive não tem descrição nesse elemento, então Description é ignorada.)
 	local function addKeybind(body, entry, o)
-		local rowTitle, description = o.Title or "Keybind", o.Description or ""
+		local rowTitle = o.Title or "Keybind"
 		local flag = o.Flag
 
-		local row = newFrame({Name = "KeybindRow", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1}, body)
-		row.LayoutOrder = nextOrder(body)
-		addRowHeader(row, rowTitle, description, 0.6)
-		registerRow(entry, row, rowTitle .. " " .. description)
+		local card = Instance.new("TextButton")
+		card.Name = "KeybindCard"
+		card.BackgroundColor3 = COLORS.KeybindCard
+		card.BackgroundTransparency = 0.12
+		card.Size = UDim2.new(1, 0, 0, 44)
+		card.LayoutOrder = nextOrder(body)
+		card.ClipsDescendants = true
+		card.Active = true
+		card.Text = ""
+		card.AutoButtonColor = false
+		card.ZIndex = 9
+		card.Parent = body
+		corner(card, 14)
+		addClayShadow(card)
+
+		local cardStroke = Instance.new("UIStroke")
+		cardStroke.Color = COLORS.KeybindBorder
+		cardStroke.Thickness = 1
+		cardStroke.Transparency = 0.6
+		cardStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		cardStroke.Parent = card
+
+		addHoverLift(card, 2)
+		registerRow(entry, card, rowTitle)
 
 		-- tecla inicial: salva no arquivo > Default > E (igual ao Expensive)
 		local currentKey = keyCodeFromName(flag and savedFlags[flag], toKeyCode(o.Default) or Enum.KeyCode.E)
 		initFlag(flag, currentKey.Name)
 		local listening = false
 
-		-- Botão idêntico ao do Expensive: 70x28, canto 10, fundo 36/36/36 com 0.25 de transparência.
+		local nameLabel = newLabel({
+			Name = "Name",
+			Position = UDim2.new(0, 16, 0, 0),
+			Size = UDim2.new(0.6, -16, 1, 0),
+			Text = rowTitle,
+			Font = Enum.Font.GothamBold,
+			TextSize = 15,
+			TextColor3 = COLORS.KeybindViewerText,
+			Truncate = true,
+		}, card)
+		nameLabel.ZIndex = 10
+
 		local kBtn = Instance.new("TextButton")
 		kBtn.Name = "KeybindButton"
 		kBtn.AnchorPoint = Vector2.new(1, 0.5)
 		kBtn.BackgroundColor3 = COLORS.KeybindBtn
 		kBtn.BackgroundTransparency = 0.25
-		kBtn.Position = UDim2.new(1, 0, 0.5, 0)
+		kBtn.Position = UDim2.new(1, -16, 0.5, 0)
 		kBtn.Size = UDim2.new(0, 70, 0, 28)
-		kBtn.FontFace = FONTS.Body
+		kBtn.FontFace = FONTS.Title
 		kBtn.TextSize = 12
 		kBtn.Text = currentKey.Name
 		kBtn.TextColor3 = COLORS.KeybindBtnText
 		kBtn.AutoButtonColor = false
-		kBtn.Parent = row
+		kBtn.ZIndex = 11
+		kBtn.Parent = card
 		corner(kBtn, 10)
 
 		-- nomes longos (ex.: RightControl) encolhem em vez de vazar do botão
@@ -1206,9 +1269,7 @@ function Library:CreateWindow(opts)
 			end))
 		end)
 
-		addDivider(row)
-
-		local api = {Row = row, Button = kBtn}
+		local api = {Row = card, Button = kBtn}
 		-- Set aceita KeyCode ou nome ("F"). noCallback = true não dispara o Callback.
 		function api:Set(k, noCallback)
 			if type(k) == "string" then
@@ -2657,71 +2718,81 @@ function Library:CreateWindow(opts)
 		return true
 	end
 
-	-- ================== LISTA DE ATALHOS (Ctrl+B) — visual do Expensive Hub ==================
-	local keybindViewerVisible = false
+	-- ================== KEYBIND LIST — SEMPRE VISÍVEL NO CANTO SUPERIOR DIREITO ==================
+	-- Mesmo painel/linhas do "Keybind List" do Expensive Hub, mas fixo na tela (arrastável).
+	-- Fica na ScreenGui, então continua aparecendo mesmo com a janela principal escondida.
+	-- Ctrl+B esconde/mostra. CreateWindow({KeybindViewer = false}) começa escondido e desliga o Ctrl+B.
+	local keybindViewerVisible = opts.KeybindViewer ~= false
+	local KB_PANEL_W = 230
+	local KB_HEADER_H = 36
+	local KB_ROW_H = 32
 
-	local kbViewer = Instance.new("CanvasGroup")
-	kbViewer.Name = "KeybindViewer"
-	kbViewer.Active = false
-	kbViewer.AnchorPoint = Vector2.new(0.5, 0.5)
-	kbViewer.BackgroundColor3 = COLORS.KeybindViewerBG
-	kbViewer.BackgroundTransparency = 0.05
-	kbViewer.Position = UDim2.new(0.5, 0, 0.5, 0)
-	kbViewer.Size = UDim2.new(0, 320, 0, 400)
-	kbViewer.ZIndex = 90
-	kbViewer.Visible = false
-	kbViewer.Parent = screenGui
-	corner(kbViewer, 18)
+	local kbPanel = Instance.new("Frame")
+	kbPanel.Name = "KeybindList"
+	kbPanel.Active = true
+	kbPanel.Draggable = true
+	kbPanel.AnchorPoint = Vector2.new(1, 0)
+	kbPanel.BackgroundColor3 = COLORS.KeybindViewerBG
+	kbPanel.BackgroundTransparency = 0.05
+	kbPanel.BorderSizePixel = 0
+	kbPanel.Position = UDim2.new(1, -10, 0, 54)
+	kbPanel.Size = UDim2.new(0, KB_PANEL_W, 0, 0)
+	kbPanel.AutomaticSize = Enum.AutomaticSize.Y
+	kbPanel.ClipsDescendants = true
+	kbPanel.ZIndex = 45
+	kbPanel.Visible = keybindViewerVisible
+	kbPanel.Parent = screenGui
+	corner(kbPanel, 18)
 	do
-		local viewerStroke = Instance.new("UIStroke")
-		viewerStroke.Color = COLORS.KeybindBorder
-		viewerStroke.Thickness = 1
-		viewerStroke.Transparency = 0.3
-		viewerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		viewerStroke.Parent = kbViewer
+		local panelStroke = Instance.new("UIStroke")
+		panelStroke.Color = COLORS.KeybindBorder
+		panelStroke.Thickness = 1
+		panelStroke.Transparency = 0.3
+		panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		panelStroke.Parent = kbPanel
 	end
-	addClayShadow(kbViewer)
+	addClayShadow(kbPanel)
 
 	local kbHeader = newLabel({
 		Name = "Header",
-		Size = UDim2.new(1, 0, 0, 42),
+		Size = UDim2.new(1, 0, 0, KB_HEADER_H),
 		Text = "Keybind List",
 		Font = Enum.Font.GothamBold,
 		TextSize = 15,
 		TextColor3 = COLORS.KeybindBtnText,
 		TextXAlignment = Enum.TextXAlignment.Center,
-	}, kbViewer)
-	kbHeader.ZIndex = 91
+	}, kbPanel)
+	kbHeader.ZIndex = 46
 
 	local kbSep = newFrame({
 		Name = "Separator",
 		Size = UDim2.new(1, -24, 0, 1),
-		Position = UDim2.new(0, 12, 0, 42),
+		Position = UDim2.new(0, 12, 0, KB_HEADER_H),
 		BackgroundColor3 = COLORS.KeybindBorder,
 		BackgroundTransparency = 0.5,
-	}, kbViewer)
-	kbSep.ZIndex = 91
+	}, kbPanel)
+	kbSep.ZIndex = 46
 
 	local kbScroll = Instance.new("ScrollingFrame")
 	kbScroll.Name = "List"
 	kbScroll.BackgroundTransparency = 1
 	kbScroll.BorderSizePixel = 0
-	kbScroll.Position = UDim2.new(0, 0, 0, 48)
-	kbScroll.Size = UDim2.new(1, 0, 1, -48)
+	kbScroll.Position = UDim2.new(0, 0, 0, KB_HEADER_H + 4)
+	kbScroll.Size = UDim2.new(1, 0, 0, 0)
 	kbScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 	kbScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	kbScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 	kbScroll.ScrollBarThickness = 3
 	kbScroll.ScrollBarImageColor3 = COLORS.KeybindBtnText
 	kbScroll.ScrollBarImageTransparency = 0.5
-	kbScroll.ZIndex = 91
-	kbScroll.Parent = kbViewer
+	kbScroll.ZIndex = 46
+	kbScroll.Parent = kbPanel
 
 	local kbPad = Instance.new("UIPadding")
-	kbPad.PaddingTop = UDim.new(0, 8)
+	kbPad.PaddingTop = UDim.new(0, 6)
 	kbPad.PaddingBottom = UDim.new(0, 8)
-	kbPad.PaddingLeft = UDim.new(0, 14)
-	kbPad.PaddingRight = UDim.new(0, 14)
+	kbPad.PaddingLeft = UDim.new(0, 12)
+	kbPad.PaddingRight = UDim.new(0, 12)
 	kbPad.Parent = kbScroll
 
 	local kbLayout = Instance.new("UIListLayout")
@@ -2730,31 +2801,7 @@ function Library:CreateWindow(opts)
 	kbLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	kbLayout.Parent = kbScroll
 
-	local kbClose = Instance.new("TextButton")
-	kbClose.Name = "Close"
-	kbClose.AnchorPoint = Vector2.new(1, 0)
-	kbClose.BackgroundTransparency = 1
-	kbClose.Position = UDim2.new(1, -10, 0, 8)
-	kbClose.Size = UDim2.new(0, 28, 0, 28)
-	kbClose.Text = "X"
-	kbClose.FontFace = FONTS.Title
-	kbClose.TextSize = 16
-	kbClose.TextColor3 = COLORS.KeybindViewerSub
-	kbClose.AutoButtonColor = false
-	kbClose.ZIndex = 92
-	kbClose.Parent = kbViewer
-	kbClose.MouseButton1Click:Connect(function()
-		keybindViewerVisible = false
-		tw(kbViewer, 0.25, {Size = UDim2.new(0, 320, 0, 0), GroupTransparency = 1},
-			Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		task.delay(0.3, function()
-			kbViewer.Visible = false
-			kbViewer.GroupTransparency = 0
-		end)
-	end)
-
 	refreshKeybindViewer = function()
-		if not keybindViewerVisible then return end
 		for _, child in ipairs(kbScroll:GetChildren()) do
 			if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
 		end
@@ -2769,15 +2816,18 @@ function Library:CreateWindow(opts)
 			entries[#entries + 1] = {Name = tostring(name), Key = kb.Key.Name, Enabled = kb.Enabled}
 		end
 
+		-- o painel cresce com a lista até 300px; depois disso a lista rola
+		kbScroll.Size = UDim2.new(1, 0, 0, math.min(#entries * (KB_ROW_H + 4) + 14, 300))
+
 		for i, entry in ipairs(entries) do
 			local rowFrame = Instance.new("Frame")
 			rowFrame.Active = false
 			rowFrame.BackgroundColor3 = COLORS.KeybindViewerRow
 			rowFrame.BackgroundTransparency = 0.4
 			rowFrame.BorderSizePixel = 0
-			rowFrame.Size = UDim2.new(1, 0, 0, 32)
+			rowFrame.Size = UDim2.new(1, 0, 0, KB_ROW_H)
 			rowFrame.LayoutOrder = i
-			rowFrame.ZIndex = 92
+			rowFrame.ZIndex = 47
 			rowFrame.Parent = kbScroll
 			corner(rowFrame, 8)
 
@@ -2788,7 +2838,7 @@ function Library:CreateWindow(opts)
 			badge.BorderSizePixel = 0
 			badge.Position = UDim2.new(1, -8, 0.5, 0)
 			badge.Size = UDim2.new(0, 60, 0, 22)
-			badge.ZIndex = 93
+			badge.ZIndex = 48
 			badge.Parent = rowFrame
 			corner(badge, 6)
 			local badgeStroke = Instance.new("UIStroke")
@@ -2806,20 +2856,21 @@ function Library:CreateWindow(opts)
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}, badge)
 			keyText.Font = Enum.Font.Code
-			keyText.ZIndex = 94
+			keyText.ZIndex = 49
 
 			local nameLabel = newLabel({
 				Position = UDim2.new(0, 10, 0, 0),
-				Size = UDim2.new(0.6, 0, 1, 0),
+				Size = UDim2.new(1, -78, 1, 0),
 				Text = entry.Name .. (entry.Enabled and "" or " (off)"),
 				TextSize = 11,
 				TextColor3 = COLORS.KeybindViewerText,
 				Truncate = true,
 			}, rowFrame)
 			nameLabel.TextTransparency = entry.Enabled and 0.1 or 0.55
-			nameLabel.ZIndex = 93
+			nameLabel.ZIndex = 48
 		end
 	end
+	refreshKeybindViewer()
 
 	function Window:IsKeybindViewerVisible()
 		return keybindViewerVisible
@@ -2827,19 +2878,13 @@ function Library:CreateWindow(opts)
 
 	function Window:ShowKeybindViewer()
 		keybindViewerVisible = true
+		kbPanel.Visible = true
 		refreshKeybindViewer()
-		kbViewer.Visible = true
-		kbViewer.GroupTransparency = 0
-		kbViewer.Size = UDim2.new(0, 320, 0, 0)
-		tw(kbViewer, 0.35, {Size = UDim2.new(0, 320, 0, 400)}, Enum.EasingStyle.Back)
 	end
 
 	function Window:HideKeybindViewer()
 		keybindViewerVisible = false
-		tw(kbViewer, 0.25, {Size = UDim2.new(0, 320, 0, 0)}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		task.delay(0.3, function()
-			kbViewer.Visible = false
-		end)
+		kbPanel.Visible = false
 	end
 
 	-- ================== INICIALIZAÇÃO ==================
