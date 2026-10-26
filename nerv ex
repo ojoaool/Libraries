@@ -29,7 +29,7 @@
 	Window.Flags                        -- tabela flag -> valor atual (e o que é salvo no arquivo)
 	Window.Changed                      -- evento (flag, value)
 
-	Page:AddTab({Name, Columns}) -> Tab  (abas no topo; opcional)
+	Page:AddTab({Name, Icon, Columns, Emoji}) -> Tab  (abas no topo; opcional)
 	Page:AddCard({Title, Icon, IconFallback, Side}) -> Card  (usa uma aba padrão se não houver abas)
 	Tab:AddCard({...}) -> Card           (Side = 1/"Left" ou 2/"Right")
 	Tab:Select()
@@ -410,11 +410,12 @@ local function addDivider(parent)
 	}, parent)
 end
 
--- Esconde o divisor da última linha visível do card (a última não leva linha embaixo).
+-- [CORRIGIDO] Esconde o divisor da última linha visível do card (a última não leva linha embaixo).
+-- Agora encontra o último elemento que TEM um RowDivider (não o último elemento qualquer).
 local function updateDividers(body)
 	local last, lastOrder = nil, -math.huge
 	for _, child in ipairs(body:GetChildren()) do
-		if child:IsA("Frame") and child.Visible and child.LayoutOrder > lastOrder then
+		if child:IsA("Frame") and child.Visible and child:FindFirstChild("RowDivider") and child.LayoutOrder > lastOrder then
 			last, lastOrder = child, child.LayoutOrder
 		end
 	end
@@ -576,7 +577,12 @@ function Library:CreateWindow(opts)
 		entry.rows[#entry.rows + 1] = {frame = row, text = string.lower(text)}
 	end
 
+	-- [MELHORADO] Adiciona margem superior sutil (4px) para afastar o texto do divider anterior
 	local function addRowHeader(row, rowTitle, description, widthScale)
+		local rowPad = Instance.new("UIPadding")
+		rowPad.PaddingTop = UDim.new(0, 4)
+		rowPad.Parent = row
+		
 		newLabel({
 			Name = "Title",
 			Size = UDim2.new(widthScale, 0, 0, 18),
@@ -2103,7 +2109,7 @@ function Library:CreateWindow(opts)
 
 		local bodyLayout = Instance.new("UIListLayout")
 		bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		bodyLayout.Padding = UDim.new(0, 6)
+		bodyLayout.Padding = UDim.new(0, 8)  -- [MELHORADO] Aumentado de 6 para 8
 		bodyLayout.Parent = body
 
 		local bodyPadding = Instance.new("UIPadding")
@@ -2249,9 +2255,11 @@ function Library:CreateWindow(opts)
 		tabLayout.Padding = UDim.new(0, 20)
 		tabLayout.Parent = page.TabBarFrame
 
+		-- [MELHORADO] Suporte a emojis nas tabs via parâmetro Emoji
 		function page:AddTab(to)
 			to = to or {}
 			local tabName = tostring(to.Name or ("Tab " .. (#page.Tabs + 1)))
+			local tabEmoji = to.Emoji or ""  -- Aceita emoji como string
 			local tab = newTab(page, tabName, to.Columns or page.Columns)
 			page.Tabs[#page.Tabs + 1] = tab
 
@@ -2269,7 +2277,7 @@ function Library:CreateWindow(opts)
 			btn.Size = UDim2.new(0, 0, 1, -4)
 			btn.AutomaticSize = Enum.AutomaticSize.X
 			btn.FontFace = FONTS.Body
-			btn.Text = tabName
+			btn.Text = tabEmoji ~= "" and (tabEmoji .. "  " .. tabName) or tabName
 			btn.TextColor3 = COLORS.TextMuted
 			btn.TextSize = 16
 			btn.Parent = holder
