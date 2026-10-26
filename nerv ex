@@ -92,8 +92,8 @@ local Library = {
 
 	-- Repositório de onde saem ícones ("gh:...") e fontes. Troque antes do CreateWindow.
 	Github = {
-		User   = "Heymanwhatsupitsgoatishere",
-		Repo   = "autumn-assets",
+		User   = "ojoaool",
+		Repo   = "wood-assets",
 		Branch = "main", -- dica: use um hash de commit pra evitar cache velho do GitHub
 	},
 
