@@ -1,5 +1,5 @@
 --[[
-	NERV UI Library v1.1
+	NERV UI Library v1.2
 	Biblioteca de UI pra executor (Roblox). Hospede este arquivo no GitHub e use:
 
 		local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/USUARIO/REPO/main/NervLib.lua"))()
@@ -18,6 +18,7 @@
 
 	Window:AddPage({Name, Icon, IconFallback, Columns = 1|2}) -> Page
 	Window:AddSettingsPage()            -- página pronta: notificações, escala, atalho, reset, unload
+	Window:AddMascot({...}) -> Mascot   -- personagem que reage ao mouse/cliques/notificações (veja abaixo)
 	Window:Notify(title, message, kind) -- kind: "info" | "success" | "error"
 	Window:Toggle() / SetVisible(bool) / Unload()
 	Window:RegisterKeybind(name, key, callback, flag?)  -- atalho global por código (key = KeyCode ou "F")
@@ -34,24 +35,39 @@
 	Tab:AddCard({...}) -> Card           (Side = 1/"Left" ou 2/"Right")
 	Tab:Select()
 
-	Card:AddToggle   {Title, Description, Default, Flag, Callback(on), Notify}
-	Card:AddDropdown {Title, Description, Options, Default (valor ou índice), Flag, Callback(value, index)}
-	Card:AddSlider   {Title, Description, Min, Max, Default, Step, Suffix, Flag, Callback(value, committed)}
-	Card:AddKeybind  {Title, Description, Default = Enum.KeyCode, Flag, Callback(), OnChanged(keyCode)}
-	                 Callback = roda ao APERTAR a tecla | OnChanged = roda quando o usuário TROCA a tecla
-	                 retorno: Get() / Set(key, silent) / SetEnabled(bool) / IsEnabled()
-	Card:AddTextbox  {Title, Description, Placeholder, ButtonText, Callback(text)}
-	Card:AddButton   {Title, Description, ButtonText, Danger, Callback()}
-	Card:AddLabel    {Text, Bold, Muted, Color, Height} -> {SetText, SetColor}
+	Card:AddToggle        {Title, Description, Default, Flag, Callback(on), Notify}
+	Card:AddDropdown      {Title, Description, Options, Default (valor ou índice), Flag, Callback(value, index)}
+	Card:AddMultiDropdown {Title, Description, Options, Default (tabela ou valor), Flag, Callback(lista)}
+	Card:AddSlider        {Title, Description, Min, Max, Default, Step, Suffix, Flag, Callback(value, committed)}
+	Card:AddProgressBar   {Title, Description, Min, Max, Default, Suffix, Flag}  -> Set(valor, animar)/SetMax(n)
+	Card:AddKeybind       {Title, Description, Default = Enum.KeyCode, Flag, Callback(), OnChanged(keyCode)}
+	                      Callback = roda ao APERTAR a tecla | OnChanged = roda quando o usuário TROCA a tecla
+	                      retorno: Get() / Set(key, silent) / SetEnabled(bool) / IsEnabled()
+	Card:AddTextbox       {Title, Description, Placeholder, Default, ButtonText, Flag, Callback(text)}
+	Card:AddButton        {Title, Description, ButtonText, Danger, Callback()}
+	Card:AddLabel         {Text, Bold, Muted, Color, Height} -> {SetText, SetColor}
 	Card:AddSeparator()
 
+	Em todos os componentes com valor, Set(valor, silent) com silent = true NÃO dispara o Callback.
+
 	Ícones aceitam: "rbxassetid://123", número, ou "gh:caminho/no/repo.png" (baixa do GitHub).
+
+	=========================== MASCOTE ===========================
+	Window:AddMascot({
+		Folder   = "hub/frames",                       -- pasta dos PNGs no repo
+		Github   = {User = "...", Repo = "...", Branch = "main"},  -- opcional (padrão: Library.Github)
+		Idle     = "mouth1",                           -- frame neutro
+		Size     = Vector2.new(150, 150),
+		Position = UDim2, Parent = Instance,           -- opcionais (padrão: rodapé da sidebar)
+		SleepAfter, Deadzone, FastSpeed,               -- opcionais
+	}) -> {Image, React(name, secs), Talk(secs)}
 ]]
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -86,7 +102,7 @@ local COLORS = {
 }
 
 local Library = {
-	Version = "1.1.0",
+	Version = "1.2.0",
 	Colors = COLORS,
 	CacheDir = "NervLib",
 
@@ -112,10 +128,12 @@ local Library = {
 	},
 }
 
--- ================== GITHUB (ÍCONES + FONTES) ==================
-local function rawUrl(repoPath)
-	local g = Library.Github
-	return string.format("https://raw.githubusercontent.com/%s/%s/%s/%s", g.User, g.Repo, g.Branch, repoPath)
+-- ================== GITHUB (ÍCONES + FONTES + MASCOTE) ==================
+-- Todas as funções aceitam um repositório opcional `g` ({User, Repo, Branch});
+-- sem ele usam Library.Github.
+local function rawUrl(repoPath, g)
+	g = g or Library.Github
+	return string.format("https://raw.githubusercontent.com/%s/%s/%s/%s", g.User, g.Repo, g.Branch or "main", repoPath)
 end
 
 local function ensureFolders(fullPath)
@@ -129,16 +147,16 @@ local function ensureFolders(fullPath)
 	end
 end
 
--- Baixa "icons/x.png" para workspace/<CacheDir>/icons/x.png (com cache). Retorna caminho local ou nil.
-local function downloadToCache(repoPath)
+-- Baixa "icons/x.png" para workspace/<CacheDir>/<user>_<repo>/icons/x.png (com cache). Retorna caminho local ou nil.
+local function downloadToCache(repoPath, g)
 	if not (writefile and isfile) then return nil end
-	local g = Library.Github
+	g = g or Library.Github
 	-- o cache inclui user/repo pra não misturar arquivos de repositórios diferentes
 	local localPath = string.format("%s/%s_%s/%s", Library.CacheDir, g.User, g.Repo, repoPath)
 	ensureFolders(localPath:match("^(.*)/[^/]+$") or Library.CacheDir)
 
 	if not isfile(localPath) then
-		local ok, data = pcall(function() return game:HttpGet(rawUrl(repoPath)) end)
+		local ok, data = pcall(function() return game:HttpGet(rawUrl(repoPath, g)) end)
 		if not ok or type(data) ~= "string" or #data == 0 or data:sub(1, 3) == "404" then
 			return nil
 		end
@@ -305,13 +323,16 @@ local function normalizeAsset(spec)
 	return nil
 end
 
-local function resolveGithubAsset(repoPath)
-	if assetCache[repoPath] then return assetCache[repoPath] end
-	local path = downloadToCache(repoPath)
+local function resolveGithubAsset(repoPath, g)
+	g = g or Library.Github
+	-- a chave inclui o repositório pra não misturar arquivos com o mesmo caminho
+	local key = g.User .. "/" .. g.Repo .. "/" .. repoPath
+	if assetCache[key] then return assetCache[key] end
+	local path = downloadToCache(repoPath, g)
 	if path and getcustomasset then
 		local ok, asset = pcall(getcustomasset, path)
 		if ok and asset then
-			assetCache[repoPath] = asset
+			assetCache[key] = asset
 			return asset
 		end
 	end
@@ -410,8 +431,8 @@ local function addDivider(parent)
 	}, parent)
 end
 
--- [CORRIGIDO] Esconde o divisor da última linha visível do card (a última não leva linha embaixo).
--- Agora encontra o último elemento que TEM um RowDivider (não o último elemento qualquer).
+-- Esconde o divisor da última linha visível do card (a última não leva linha embaixo).
+-- Considera só os elementos que TÊM um RowDivider.
 local function updateDividers(body)
 	local last, lastOrder = nil, -math.huge
 	for _, child in ipairs(body:GetChildren()) do
@@ -490,6 +511,7 @@ function Library:CreateWindow(opts)
 
 	-- Forward declarations (preenchidas mais abaixo)
 	local screenGui, mainFrame, overlay, overlayCatcher, uiScale, contentCanvas
+	local sidebar, navList -- usados pelo mascote
 	local showNotification, updateActivePage, applySearch, setUiVisible, applyScale
 	local closeOpenDropdown
 	local unloaded = false
@@ -577,12 +599,12 @@ function Library:CreateWindow(opts)
 		entry.rows[#entry.rows + 1] = {frame = row, text = string.lower(text)}
 	end
 
-	-- [MELHORADO] Adiciona margem superior sutil (4px) para afastar o texto do divider anterior
+	-- Adiciona margem superior sutil (4px) para afastar o texto do divider anterior
 	local function addRowHeader(row, rowTitle, description, widthScale)
 		local rowPad = Instance.new("UIPadding")
 		rowPad.PaddingTop = UDim.new(0, 4)
 		rowPad.Parent = row
-		
+
 		newLabel({
 			Name = "Title",
 			Size = UDim2.new(widthScale, 0, 0, 18),
@@ -670,13 +692,13 @@ function Library:CreateWindow(opts)
 			closeTween:Play()
 		end
 
-		-- Aplica uma seleção: atualiza texto, flag e callback.
-		local function commit(index)
+		-- Aplica uma seleção: atualiza texto, flag e callback (silent = não chama o callback).
+		local function commit(index, silent)
 			selectedIndex = index
 			local value = currentOptions[index]
 			valueLabel.Text = value or ""
 			setFlag(flag, value)
-			fire(o.Callback, value, index)
+			if not silent then fire(o.Callback, value, index) end
 		end
 
 		local function openList()
@@ -760,15 +782,16 @@ function Library:CreateWindow(opts)
 		function api:Get()
 			return currentOptions[selectedIndex], selectedIndex
 		end
-		function api:Set(value)
+		-- silent = true não dispara o Callback (evita loop se Set for chamado dentro dele).
+		function api:Set(value, silent)
 			local index = findOptionIndex(currentOptions, value, nil)
-			if index then commit(index) end
+			if index then commit(index, silent) end
 		end
 		-- Troca a lista de opções (ex.: estágios que dependem de outro dropdown).
-		function api:SetOptions(newOptions, preferredValue)
+		function api:SetOptions(newOptions, preferredValue, silent)
 			closeList()
 			currentOptions = newOptions or {}
-			commit(findOptionIndex(currentOptions, preferredValue, 1))
+			commit(findOptionIndex(currentOptions, preferredValue, 1), silent)
 		end
 
 		if o.CallOnLoad then fire(o.Callback, currentOptions[selectedIndex], selectedIndex) end
@@ -898,18 +921,18 @@ function Library:CreateWindow(opts)
 
 		local api = {Row = row}
 		function api:Get() return currentValue end
-		function api:Set(value)
+		function api:Set(value, silent)
 			currentValue = snap(value)
 			render(false)
 			setFlag(flag, currentValue)
-			fire(o.Callback, currentValue, true)
+			if not silent then fire(o.Callback, currentValue, true) end
 		end
 
 		if o.CallOnLoad then fire(o.Callback, currentValue, true) end
 		return api
 	end
 
-    	-- ---------- PROGRESS BAR ----------
+	-- ---------- PROGRESS BAR ----------
 	local function addProgressBar(body, entry, o)
 		local rowTitle, description = o.Title or "Progress", o.Description or ""
 		local flag = o.Flag
@@ -930,7 +953,7 @@ function Library:CreateWindow(opts)
 			TextXAlignment = Enum.TextXAlignment.Right,
 		}, row)
 
-		local track = newFrame({
+		local progressTrack = newFrame({
 			Name = "ProgressTrack",
 			Size = UDim2.new(1, 0, 0, 8),
 			Position = UDim2.new(0, 0, 0, 46),
@@ -943,7 +966,7 @@ function Library:CreateWindow(opts)
 			Size = UDim2.new(0, 0, 1, 0),
 			BackgroundColor3 = COLORS.Accent,
 			Corner = 4,
-		}, track)
+		}, progressTrack)
 
 		local currentValue = math.clamp(saved(flag, o.Default or min), min, max)
 		initFlag(flag, currentValue)
@@ -983,14 +1006,14 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-    	-- ---------- MULTI DROPDOWN ----------
+	-- ---------- MULTI DROPDOWN ----------
 	local function addMultiDropdown(body, entry, o)
 		local rowTitle, description = o.Title or "Multi Select", o.Description or ""
 		local flag = o.Flag
 		local currentOptions = o.Options or {}
 		local selected = {}
 
-		-- Default: table, valor único ou nil
+		-- Default: tabela, valor único ou nil
 		if type(o.Default) == "table" then
 			for _, v in ipairs(o.Default) do selected[v] = true end
 		elseif o.Default ~= nil then
@@ -1053,10 +1076,10 @@ function Library:CreateWindow(opts)
 			end
 		end
 
-		local function commit()
+		local function commit(silent)
 			local list = getSelectedList()
 			setFlag(flag, list)
-			fire(o.Callback, list)
+			if not silent then fire(o.Callback, list) end
 			updateLabel()
 		end
 
@@ -1216,31 +1239,31 @@ function Library:CreateWindow(opts)
 
 		local api = {Row = row}
 		function api:Get() return getSelectedList() end
-		function api:Set(values)
+		function api:Set(values, silent)
 			selected = {}
 			if type(values) == "table" then
 				for _, v in ipairs(values) do selected[v] = true end
 			elseif values ~= nil then
 				selected[values] = true
 			end
-			commit()
+			commit(silent)
 		end
-		function api:Toggle(value, state)
+		function api:Toggle(value, state, silent)
 			if state == nil then
 				selected[value] = not selected[value] or nil
 			else
 				selected[value] = state and true or nil
 			end
-			commit()
+			commit(silent)
 		end
-		function api:SetOptions(newOptions)
+		function api:SetOptions(newOptions, silent)
 			if listFrame then closeList() end
 			currentOptions = newOptions or {}
 			-- remove seleções que não existem mais
 			for v in pairs(selected) do
 				if not table.find(currentOptions, v) then selected[v] = nil end
 			end
-			commit()
+			commit(silent)
 		end
 
 		if o.CallOnLoad then fire(o.Callback, getSelectedList()) end
@@ -1482,17 +1505,19 @@ function Library:CreateWindow(opts)
 		clickCatcher.Text = ""
 		clickCatcher.Parent = toggleBg
 
-		-- Retorna true se o estado foi aplicado.
+		-- silent = não mostra notificação (e não chama o Callback).
 		local function setState(value, silent)
 			value = value and true or false
 			if value == isOn then return true end
 			isOn = value
 			setToggleVisual(toggleBg, knob, isOn)
 			setFlag(flag, isOn)
-			if o.Notify and not silent then
-				showNotification(rowTitle, isOn and "Ativado" or "Desativado", isOn and "success" or "info")
+			if not silent then
+				if o.Notify then
+					showNotification(rowTitle, isOn and "Ativado" or "Desativado", isOn and "success" or "info")
+				end
+				fire(o.Callback, isOn)
 			end
-			fire(o.Callback, isOn)
 			return true
 		end
 
@@ -1513,6 +1538,7 @@ function Library:CreateWindow(opts)
 	-- ---------- TEXTBOX ----------
 	local function addTextbox(body, entry, o)
 		local rowTitle, description = o.Title or "Input", o.Description or ""
+		local flag = o.Flag
 
 		local row = newFrame({Name = "TextboxRow", Size = UDim2.new(1, 0, 0, 78), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
@@ -1528,6 +1554,9 @@ function Library:CreateWindow(opts)
 		}, row)
 		stroke(inputBox, COLORS.PanelBorder, 1)
 
+		local startText = saved(flag, tostring(o.Default or ""))
+		initFlag(flag, startText)
+
 		local textBox = Instance.new("TextBox")
 		textBox.Name = "Input"
 		textBox.BackgroundTransparency = 1
@@ -1536,7 +1565,7 @@ function Library:CreateWindow(opts)
 		textBox.FontFace = FONTS.Body
 		textBox.PlaceholderText = o.Placeholder or ""
 		textBox.PlaceholderColor3 = COLORS.TextMuted
-		textBox.Text = o.Default or ""
+		textBox.Text = startText
 		textBox.TextColor3 = COLORS.TextPrimary
 		textBox.TextSize = 14
 		textBox.TextXAlignment = Enum.TextXAlignment.Left
@@ -1556,18 +1585,27 @@ function Library:CreateWindow(opts)
 		}, row)
 		addHover(actionBtn, COLORS.Accent, Color3.fromRGB(215, 215, 220))
 
-		actionBtn.MouseButton1Click:Connect(function()
+		local function submit()
+			setFlag(flag, textBox.Text)
 			fire(o.Callback, textBox.Text)
-		end)
+		end
+
+		actionBtn.MouseButton1Click:Connect(submit)
 		textBox.FocusLost:Connect(function(enterPressed)
-			if enterPressed then fire(o.Callback, textBox.Text) end
+			if enterPressed then submit() end
 		end)
 
 		addDivider(row)
 
 		local api = {Row = row, Box = textBox}
 		function api:Get() return textBox.Text end
-		function api:Set(text) textBox.Text = tostring(text or "") end
+		function api:Set(text, silent)
+			textBox.Text = tostring(text or "")
+			setFlag(flag, textBox.Text)
+			if not silent then fire(o.Callback, textBox.Text) end
+		end
+
+		if o.CallOnLoad then fire(o.Callback, textBox.Text) end
 		return api
 	end
 
@@ -1642,9 +1680,9 @@ function Library:CreateWindow(opts)
 		end
 		api.AddToggle = wrap(addToggle)
 		api.AddDropdown = wrap(addDropdown)
-        api.AddMultiDropdown = wrap(addMultiDropdown) 
+		api.AddMultiDropdown = wrap(addMultiDropdown)
 		api.AddSlider = wrap(addSlider)
-        api.AddProgressBar = wrap(addProgressBar) 
+		api.AddProgressBar = wrap(addProgressBar)
 		api.AddKeybind = wrap(addKeybind)
 		api.AddTextbox = wrap(addTextbox)
 		api.AddButton = wrap(addButton)
@@ -1751,6 +1789,9 @@ function Library:CreateWindow(opts)
 	local activeToasts = {}
 
 	showNotification = function(toastTitle, message, kind)
+		-- o mascote (se existir) reage mesmo com as notificações desligadas
+		if Window.OnNotify then Window.OnNotify(kind) end
+
 		-- Com notificações desligadas, só erros aparecem.
 		if not notificationsEnabled() and kind ~= "error" then return end
 
@@ -1942,7 +1983,7 @@ function Library:CreateWindow(opts)
 	end
 
 	-- ================== SIDEBAR ==================
-	local sidebar = newFrame({
+	sidebar = newFrame({
 		Name = "Sidebar",
 		Size = UDim2.new(0, 210, 1, 0),
 		BackgroundColor3 = COLORS.Sidebar,
@@ -2017,7 +2058,7 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = COLORS.Divider,
 	}, sidebar)
 
-	local navList = newFrame({
+	navList = newFrame({
 		Name = "NavList",
 		Size = UDim2.new(1, -22, 1, -104),
 		Position = UDim2.new(0, 11, 0, 90),
@@ -2456,7 +2497,7 @@ function Library:CreateWindow(opts)
 
 		local bodyLayout = Instance.new("UIListLayout")
 		bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		bodyLayout.Padding = UDim.new(0, 8)  -- [MELHORADO] Aumentado de 6 para 8
+		bodyLayout.Padding = UDim.new(0, 8)
 		bodyLayout.Parent = body
 
 		local bodyPadding = Instance.new("UIPadding")
@@ -2602,8 +2643,7 @@ function Library:CreateWindow(opts)
 		tabLayout.Padding = UDim.new(0, 20)
 		tabLayout.Parent = page.TabBarFrame
 
-		-- [MELHORADO] Suporte a emojis nas tabs via parâmetro Emoji
-				-- [MELHORADO] Suporte a ícones do GitHub/Roblox/emojis nas tabs
+		-- Abas aceitam ícone (GitHub/Roblox) ou emoji.
 		function page:AddTab(to)
 			to = to or {}
 			local tabName = tostring(to.Name or ("Tab " .. (#page.Tabs + 1)))
@@ -3037,6 +3077,176 @@ function Library:CreateWindow(opts)
 			}
 		end
 		return result
+	end
+
+	-- ================== MASCOTE ==================
+	-- Personagem que reage ao mouse, aos cliques e às notificações.
+	-- Espera PNGs com estes nomes dentro de `Folder` (ex.: hub/frames):
+	-- angry blink blushAway boop denial dizzy excited flustered grumpy huff laugh
+	-- lookDown lookL lookR lookUp mouth1 mouth2 mouth3 nervous ow pat poke pout
+	-- shyGlance sleep smug squint wink yawn
+	function Window:AddMascot(mo)
+		mo = mo or {}
+		local gh = mo.Github -- opcional: {User=, Repo=, Branch=}
+		local folder = mo.Folder or "hub/frames"
+		local size = mo.Size or Vector2.new(150, 150)
+		local idleName = mo.Idle or "mouth1"
+		local sleepAfter = mo.SleepAfter or 12
+		local deadzone = mo.Deadzone or 70
+		local fastSpeed = mo.FastSpeed or 3500 -- px/s
+
+		local NAMES = {
+			"angry", "blink", "blushAway", "boop", "denial", "dizzy", "excited", "flustered",
+			"grumpy", "huff", "laugh", "lookDown", "lookL", "lookR", "lookUp",
+			"mouth1", "mouth2", "mouth3", "nervous", "ow", "pat", "poke", "pout",
+			"shyGlance", "sleep", "smug", "squint", "wink", "yawn",
+		}
+		local MOUTHS = {"mouth1", "mouth2", "mouth3"}
+		local function pick(t) return t[math.random(#t)] end
+
+		-- ---------- Imagem ----------
+		local parent = mo.Parent or sidebar
+		local button = Instance.new("ImageButton")
+		button.Name = "Mascot"
+		button.BackgroundTransparency = 1
+		button.AutoButtonColor = false
+		button.Size = UDim2.fromOffset(size.X, size.Y)
+		button.AnchorPoint = Vector2.new(0.5, 1)
+		button.Position = mo.Position or UDim2.new(0.5, 0, 1, -10)
+		button.ScaleType = Enum.ScaleType.Fit
+		button.Parent = parent
+		if parent == sidebar then
+			-- a lista de páginas não passa por baixo dela
+			navList.Size = UDim2.new(1, -22, 1, -104 - size.Y)
+		end
+
+		local frames, shown = {}, idleName
+		local function show(name)
+			shown = name
+			local asset = frames[name] or frames[idleName]
+			if asset and button.Image ~= asset then button.Image = asset end
+		end
+
+		-- baixa todos os frames em paralelo (com cache em disco)
+		for _, name in ipairs(NAMES) do
+			task.spawn(function()
+				local asset = resolveGithubAsset(folder .. "/" .. name .. ".png", gh)
+				if asset then
+					frames[name] = asset
+					if not unloaded then show(shown) end -- reaplica caso o frame atual tenha acabado de chegar
+				end
+			end)
+		end
+
+		-- ---------- Estado ----------
+		local reactName, reactUntil = nil, 0
+		local blinkUntil, nextBlink = 0, os.clock() + 3
+		local talkUntil = 0
+		local holding, holdStart = false, 0
+		local hovering = false
+		local lookName = idleName
+		local clicks, lastClick = 0, 0
+		local lastMouse = UserInputService:GetMouseLocation()
+		local lastMove, lastTick = os.clock(), os.clock()
+
+		local function react(name, duration)
+			reactName, reactUntil = name, os.clock() + (duration or 1.2)
+		end
+
+		-- ---------- Interação direta ----------
+		button.MouseEnter:Connect(function() hovering = true end)
+		button.MouseLeave:Connect(function() hovering, holding = false, false end)
+
+		button.MouseButton1Down:Connect(function()
+			local now = os.clock()
+			holding, holdStart = true, now
+			clicks = (now - lastClick < 2) and clicks + 1 or 1
+			lastClick = now
+		end)
+
+		button.MouseButton1Up:Connect(function()
+			if not holding then return end
+			holding = false
+			local held = os.clock() - holdStart
+			if held > 1.5 then react("flustered", 1.8)
+			elseif held > 0.35 then react("blushAway", 1.2)
+			elseif clicks >= 9 then react("angry", 1.6)
+			elseif clicks >= 7 then react("grumpy", 1.4)
+			elseif clicks >= 5 then react("dizzy", 1.4)
+			elseif clicks >= 3 then react("ow", 1)
+			else react(clicks % 2 == 1 and "poke" or "boop", 0.7) end
+		end)
+
+		-- ---------- Loop principal ----------
+		task.spawn(function()
+			while not unloaded do
+				task.wait(0.05)
+				if unloaded then break end
+				if not mainFrame.Visible then continue end
+				local now = os.clock()
+
+				-- movimento do mouse
+				local mouse = UserInputService:GetMouseLocation()
+				local dist = (mouse - lastMouse).Magnitude
+				local speed = dist / math.max(now - lastTick, 0.001)
+				lastTick, lastMouse = now, mouse
+				if dist > 2 then lastMove = now end
+				if speed > fastSpeed and not reactName then react("nervous", 0.7) end
+
+				-- direção do olhar (GetMouseLocation inclui o inset do topo da tela)
+				local center = button.AbsolutePosition + button.AbsoluteSize / 2
+				local inset = GuiService:GetGuiInset()
+				local d = (mouse - inset) - center
+				if d.Magnitude < deadzone then lookName = idleName
+				elseif math.abs(d.X) > math.abs(d.Y) then lookName = d.X < 0 and "lookL" or "lookR"
+				else lookName = d.Y < 0 and "lookUp" or "lookDown" end
+
+				-- piscar
+				if now >= nextBlink then
+					blinkUntil = now + 0.14
+					nextBlink = now + 2.5 + math.random() * 3.5
+				end
+
+				-- fim de reação (depois de brava, ela bufa)
+				if reactName and now >= reactUntil then
+					if reactName == "angry" then react("huff", 1.5) else reactName = nil end
+				end
+
+				-- escolhe o frame (prioridade de cima pra baixo)
+				local idle = now - lastMove
+				local name
+				if holding and now - holdStart > 0.35 then name = "pat"
+				elseif reactName then name = reactName
+				elseif now < blinkUntil and idle < sleepAfter then name = "blink"
+				elseif now < talkUntil then name = MOUTHS[math.floor(now * 9) % 3 + 1]
+				elseif idle > sleepAfter + 6 then name = "sleep"
+				elseif idle > sleepAfter + 3 then name = "yawn"
+				elseif idle > sleepAfter then name = "squint"
+				elseif hovering then name = "shyGlance"
+				else name = lookName end
+
+				if name ~= shown then show(name) end
+			end
+		end)
+
+		-- ---------- Reage à UI ----------
+		Window.OnNotify = function(kind)
+			if kind == "success" then react(pick({"excited", "laugh", "wink"}), 1.6)
+			elseif kind == "error" then react(pick({"ow", "denial", "nervous"}), 1.8)
+			else talkUntil = os.clock() + 1.4 end
+		end
+
+		-- toggles ligando/desligando: pisca/emburra
+		track(Window.Changed:Connect(function(_, value)
+			if value == true then react("wink", 0.9)
+			elseif value == false then react("pout", 0.9) end
+		end))
+
+		return {
+			Image = button,
+			React = function(_, name, duration) react(name, duration) end,
+			Talk = function(_, duration) talkUntil = os.clock() + (duration or 1.5) end,
+		}
 	end
 
 	-- ================== INICIALIZAÇÃO ==================
