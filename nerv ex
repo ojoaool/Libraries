@@ -14,13 +14,12 @@
 	Library:CreateWindow({
 		Title, Subtitle, Logo, LogoFallback, Size = Vector2, ToggleKey = Enum.KeyCode,
 		ConfigFile, Id,
-		KeySystem = {Enabled = true, Keys = {"..."}},
 	}) -> Window
 
 	Window:AddPage({Name, Icon, IconFallback, Columns = 1|2}) -> Page
 	Window:AddSettingsPage()            -- página pronta: notificações, escala, atalho, reset, unload
 	Window:Notify(title, message, kind) -- kind: "info" | "success" | "error"
-	Window:Toggle() / SetVisible(bool) / Unload() / IsUnlocked()
+	Window:Toggle() / SetVisible(bool) / Unload()
 	Window:RegisterKeybind(name, key, callback, flag?)  -- atalho global por código (key = KeyCode ou "F")
 	Window:UnregisterKeybind(name) / SetKeybindEnabled(name, bool) / SetKeybindKey(name, key)
 	Window:SetToggleKeybind(key)  -- tecla de mostrar/esconder a janela
@@ -35,7 +34,7 @@
 	Tab:AddCard({...}) -> Card           (Side = 1/"Left" ou 2/"Right")
 	Tab:Select()
 
-	Card:AddToggle   {Title, Description, Default, Flag, Callback(on), RequiresKey, Notify}
+	Card:AddToggle   {Title, Description, Default, Flag, Callback(on), Notify}
 	Card:AddDropdown {Title, Description, Options, Default (valor ou índice), Flag, Callback(value, index)}
 	Card:AddSlider   {Title, Description, Min, Max, Default, Step, Suffix, Flag, Callback(value, committed)}
 	Card:AddKeybind  {Title, Description, Default = Enum.KeyCode, Flag, Callback(), OnChanged(keyCode)}
@@ -44,7 +43,6 @@
 	Card:AddTextbox  {Title, Description, Placeholder, ButtonText, Callback(text)}
 	Card:AddButton   {Title, Description, ButtonText, Danger, Callback()}
 	Card:AddLabel    {Text, Bold, Muted, Color, Height} -> {SetText, SetColor}
-	Card:AddKeyInput {Title, Description, Placeholder, ButtonText, Callback(valid)}
 	Card:AddSeparator()
 
 	Ícones aceitam: "rbxassetid://123", número, ou "gh:caminho/no/repo.png" (baixa do GitHub).
@@ -481,6 +479,13 @@ function Library:CreateWindow(opts)
 		connections[#connections + 1] = connection
 		return connection
 	end
+	-- Desconecta e remove da lista (evita acumular conexões de atalhos já atribuídos).
+	local function untrack(connection)
+		if not connection then return end
+		pcall(function() connection:Disconnect() end)
+		local idx = table.find(connections, connection)
+		if idx then table.remove(connections, idx) end
+	end
 
 	-- Forward declarations (preenchidas mais abaixo)
 	local screenGui, mainFrame, overlay, overlayCatcher, uiScale, contentCanvas
@@ -499,14 +504,13 @@ function Library:CreateWindow(opts)
 	-- ---------- Persistência (por flag) ----------
 	local configFile = opts.ConfigFile or ("NervLib_" .. (string.gsub(windowId, "[^%w_%-]", "_")) .. ".json")
 	local saveDisabled = false
-	local savedFlags, savedKey = {}, ""
+	local savedFlags = {}
 
 	pcall(function()
 		if isfile and isfile(configFile) then
 			local data = HttpService:JSONDecode(readfile(configFile))
 			if type(data) == "table" then
 				if type(data.Flags) == "table" then savedFlags = data.Flags end
-				if type(data.Key) == "string" then savedKey = data.Key end
 			end
 		end
 	end)
@@ -521,7 +525,6 @@ function Library:CreateWindow(opts)
 		return v
 	end
 
-	local keyValue = ""
 	local configDirty, saveScheduled = false, false
 
 	local function saveConfig()
@@ -532,7 +535,6 @@ function Library:CreateWindow(opts)
 				writefile(configFile, HttpService:JSONEncode({
 					Version = 1,
 					Flags = Window.Flags,
-					Key = keyValue,
 				}))
 			end
 		end)
@@ -560,32 +562,6 @@ function Library:CreateWindow(opts)
 	-- Valor inicial (restaurado ou padrão), sem disparar evento.
 	local function initFlag(flag, value)
 		if flag then Window.Flags[flag] = value end
-	end
-
-	-- ---------- Key system ----------
-	local keyCfg = opts.KeySystem or {}
-	local keyEnabled = keyCfg.Enabled == true
-	local validKeys = {}
-	for _, k in ipairs(keyCfg.Keys or {}) do
-		validKeys[string.upper(trim(k))] = true
-	end
-	local function isKeyValid(text)
-		return validKeys[string.upper(trim(text))] == true
-	end
-
-	local keyUnlocked = (not keyEnabled) or isKeyValid(savedKey)
-	if keyEnabled and keyUnlocked then keyValue = savedKey end
-
-	-- Toggles com RequiresKey registram aqui um "forçar desligado".
-	local gatedToggles = {}
-
-	local function setKeyUnlocked(isValid)
-		keyUnlocked = isValid or not keyEnabled
-		if not keyUnlocked then
-			for _, forceOff in ipairs(gatedToggles) do
-				forceOff()
-			end
-		end
 	end
 
 	-- ---------- Notificações ativas? (flag da página Settings, se existir) ----------
@@ -858,12 +834,12 @@ function Library:CreateWindow(opts)
 		local fillTween, knobTween
 
 		local function render(animate)
-			local ratio = (currentValue - min) / (max - min)
+			local ratio = max > min and (currentValue - min) / (max - min) or 0
 			valueLabel.Text = tostring(currentValue) .. suffix
 			if fillTween then fillTween:Cancel() end
 			if knobTween then knobTween:Cancel() end
 			if animate then
-				local info = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+				local info = TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 				fillTween = TweenService:Create(fill, info, {Size = UDim2.new(ratio, 0, 1, 0)})
 				knobTween = TweenService:Create(knob, info, {Position = UDim2.new(ratio, 0, 0.5, 0)})
 				fillTween:Play()
@@ -1051,10 +1027,8 @@ function Library:CreateWindow(opts)
 			isListening = false
 			isAnyKeybindListening = false
 			keybindCooldownUntil = os.clock() + 0.25 -- evita disparar a ação com a própria tecla recém-atribuída
-			if listenConnection then
-				listenConnection:Disconnect()
-				listenConnection = nil
-			end
+			untrack(listenConnection)
+			listenConnection = nil
 			if newKeyCode then
 				applyKeybindKey(id, newKeyCode)
 			end
@@ -1129,7 +1103,6 @@ function Library:CreateWindow(opts)
 	local function addToggle(body, entry, o)
 		local rowTitle, description = o.Title or "Toggle", o.Description or ""
 		local flag = o.Flag
-		local requiresKey = o.RequiresKey and keyEnabled
 
 		local row = newFrame({Name = "ToggleRow", Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
@@ -1137,7 +1110,6 @@ function Library:CreateWindow(opts)
 		registerRow(entry, row, rowTitle .. " " .. description)
 
 		local isOn = saved(flag, o.Default and true or false)
-		if requiresKey and not keyUnlocked then isOn = false end
 		initFlag(flag, isOn)
 
 		local toggleBg = newFrame({
@@ -1170,11 +1142,6 @@ function Library:CreateWindow(opts)
 		local function setState(value, silent)
 			value = value and true or false
 			if value == isOn then return true end
-			if value and requiresKey and not keyUnlocked then
-				showNotification("Key necessária",
-					"Insira uma key válida para ativar " .. rowTitle .. ".", "error")
-				return false
-			end
 			isOn = value
 			setToggleVisual(toggleBg, knob, isOn)
 			setFlag(flag, isOn)
@@ -1188,12 +1155,6 @@ function Library:CreateWindow(opts)
 		clickCatcher.MouseButton1Click:Connect(function()
 			setState(not isOn)
 		end)
-
-		if requiresKey then
-			gatedToggles[#gatedToggles + 1] = function()
-				setState(false, true)
-			end
-		end
 
 		addDivider(row)
 
@@ -1324,69 +1285,6 @@ function Library:CreateWindow(opts)
 		return {Row = line}
 	end
 
-	-- ---------- KEY INPUT (status + textbox) ----------
-	local function addKeyInput(body, entry, o)
-		local statusRow = newFrame({Name = "KeyStatusRow", Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1}, body)
-		statusRow.LayoutOrder = nextOrder(body)
-		registerRow(entry, statusRow, "key status")
-
-		local statusLabel = newLabel({
-			Size = UDim2.new(1, 0, 1, 0),
-			Text = "",
-			TextSize = 13,
-		}, statusRow)
-
-		-- state: "valid" | "invalid" | "required" | "disabled"
-		local function setKeyStatus(state)
-			local color, text
-			if state == "valid" then
-				color, text = COLORS.Success, "✔ Key válida"
-			elseif state == "invalid" then
-				color, text = COLORS.Danger, "✕ Key inválida"
-			elseif state == "required" then
-				color, text = COLORS.TextMuted, "• Key necessária para ativar as automações"
-			else
-				color, text = COLORS.TextMuted, "• Key system desativado"
-			end
-			statusLabel.Text = text
-			statusLabel.TextColor3 = color
-		end
-
-		local function onSubmitted(text)
-			local key = trim(text)
-			if key == "" then
-				showNotification("Key System", "Digite uma key.", "error")
-				return
-			end
-			local valid = isKeyValid(key)
-			keyValue = valid and key or ""
-			setKeyUnlocked(valid)
-			setKeyStatus(valid and "valid" or "invalid")
-			setFlag("KeySystem.Unlocked", keyUnlocked)
-			showNotification("Key System",
-				valid and "Key válida — automação liberada." or "Key inválida.", valid and "success" or "error")
-			fire(o.Callback, valid)
-		end
-
-		local api = addTextbox(body, entry, {
-			Title = o.Title or "Insert Key",
-			Description = o.Description or "Cole sua key para liberar a automação.",
-			Placeholder = o.Placeholder or "Sua key aqui...",
-			ButtonText = o.ButtonText or "Insert",
-			Callback = onSubmitted,
-		})
-
-		if not keyEnabled then
-			setKeyStatus("disabled")
-		elseif keyUnlocked then
-			api:Set(keyValue)
-			setKeyStatus("valid")
-		else
-			setKeyStatus("required")
-		end
-		return api
-	end
-
 	-- API pública de um card (métodos com ":").
 	local function makeCardApi(body, entry)
 		entry.body = body
@@ -1405,7 +1303,6 @@ function Library:CreateWindow(opts)
 		api.AddTextbox = wrap(addTextbox)
 		api.AddButton = wrap(addButton)
 		api.AddLabel = wrap(addLabel)
-		api.AddKeyInput = wrap(addKeyInput)
 		function api:AddSeparator()
 			local result = addSeparator(body)
 			updateDividers(body)
@@ -2092,6 +1989,7 @@ function Library:CreateWindow(opts)
 		noResultsLabel.Visible = query ~= "" and #tab.Cards > 0 and not anyCardVisible
 	end
 	searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+		closeAnyOpenDropdown()
 		applySearch()
 	end)
 
@@ -2497,10 +2395,6 @@ function Library:CreateWindow(opts)
 
 	function Window:Toggle()
 		setUiVisible(not mainFrame.Visible)
-	end
-
-	function Window:IsUnlocked()
-		return keyUnlocked
 	end
 
 	function Window:SelectPage(page)
