@@ -1,5 +1,5 @@
 --[[
-	NERV UI Library v1.0
+	NERV UI Library v1.1
 	Biblioteca de UI pra executor (Roblox). Hospede este arquivo no GitHub e use:
 
 		local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/USUARIO/REPO/main/NervLib.lua"))()
@@ -62,33 +62,33 @@ local env = (getgenv and getgenv()) or _G
 -- ================== PALETA ==================
 -- Dá pra sobrescrever antes do CreateWindow: Library.Colors.Accent = Color3.fromRGB(...)
 local COLORS = {
-	Background   = Color3.fromRGB(15, 17, 23),
-	Panel        = Color3.fromRGB(20, 23, 31),
-	PanelBorder  = Color3.fromRGB(35, 39, 50),
-	Sidebar      = Color3.fromRGB(12, 14, 19),
-	Card         = Color3.fromRGB(24, 27, 36),
-	CardHeader   = Color3.fromRGB(140, 148, 165),
-	CardHeaderBg = Color3.fromRGB(17, 20, 27),
-	Field        = Color3.fromRGB(18, 20, 28),
-	FieldHover   = Color3.fromRGB(28, 31, 41),
-	TextPrimary  = Color3.fromRGB(235, 236, 240),
-	TextMuted    = Color3.fromRGB(140, 145, 160),
-	Accent       = Color3.fromRGB(255, 255, 255),
+	Background   = Color3.fromRGB(13, 16, 23),
+	Panel        = Color3.fromRGB(20, 24, 34),
+	PanelBorder  = Color3.fromRGB(38, 45, 62),
+	Sidebar      = Color3.fromRGB(10, 12, 17),
+	Card         = Color3.fromRGB(23, 28, 41),
+	CardHeader   = Color3.fromRGB(140, 150, 172),
+	CardHeaderBg = Color3.fromRGB(26, 32, 47),
+	Field        = Color3.fromRGB(15, 18, 27),
+	FieldHover   = Color3.fromRGB(30, 36, 52),
+	TextPrimary  = Color3.fromRGB(235, 238, 245),
+	TextMuted    = Color3.fromRGB(140, 148, 168),
+	Accent       = Color3.fromRGB(255, 255, 255), -- dica: Color3.fromRGB(88, 160, 255) pra ficar azul como o hub
 	AccentDark   = Color3.fromRGB(20, 20, 24),
-	ToggleOff    = Color3.fromRGB(18, 20, 28),
+	ToggleOff    = Color3.fromRGB(15, 18, 27),
 	ToggleOn     = Color3.fromRGB(255, 255, 255),
-	Knob         = Color3.fromRGB(240, 240, 245),
-	Divider      = Color3.fromRGB(38, 41, 52),
-	NavActiveBg  = Color3.fromRGB(38, 38, 42),
-	SelectedBg   = Color3.fromRGB(45, 45, 48),
-	Scroll       = Color3.fromRGB(70, 74, 90),
+	Knob         = Color3.fromRGB(235, 238, 250),
+	Divider      = Color3.fromRGB(40, 47, 64),
+	NavActiveBg  = Color3.fromRGB(28, 44, 78),
+	SelectedBg   = Color3.fromRGB(36, 44, 64),
+	Scroll       = Color3.fromRGB(70, 78, 100),
 	Success      = Color3.fromRGB(90, 210, 130),
 	Danger       = Color3.fromRGB(230, 90, 90),
 	DangerHover  = Color3.fromRGB(150, 50, 55),
 }
 
 local Library = {
-	Version = "1.0.0",
+	Version = "1.1.0",
 	Colors = COLORS,
 	CacheDir = "NervLib",
 
@@ -416,12 +416,12 @@ end
 local function createChevron(parent)
 	local icon = createIcon({
 		Name = "Chevron",
-		Size = UDim2.new(0, 16, 0, 16),
-		Position = UDim2.new(1, -24, 0.5, 0),
+		Size = UDim2.new(0, 18, 0, 18),
+		Position = UDim2.new(1, -26, 0.5, 0),
 		AnchorPoint = Vector2.new(0, 0.5),
 		AssetId = Library.Icons.ChevronDown,
 		FallbackText = "⌄",
-		TextSize = 13,
+		TextSize = 14,
 		ImageColor3 = COLORS.TextMuted,
 	}, parent)
 
@@ -440,8 +440,8 @@ function Library:CreateWindow(opts)
 	local title = tostring(opts.Title or "NERV")
 	local subtitle = tostring(opts.Subtitle or "")
 	local windowId = tostring(opts.Id or title)
-	local WINDOW_W = (opts.Size and opts.Size.X) or 940
-	local WINDOW_H = (opts.Size and opts.Size.Y) or 580
+	local WINDOW_W = (opts.Size and opts.Size.X) or 1020
+	local WINDOW_H = (opts.Size and opts.Size.Y) or 640
 	local FADE_SPEED = 0.18
 	local MAX_TOASTS = 4
 
@@ -587,19 +587,19 @@ function Library:CreateWindow(opts)
 	local function addRowHeader(row, rowTitle, description, widthScale)
 		newLabel({
 			Name = "Title",
-			Size = UDim2.new(widthScale, 0, 0, 15),
+			Size = UDim2.new(widthScale, 0, 0, 18),
 			Text = rowTitle,
 			Font = Enum.Font.GothamBold,
-			TextSize = 13,
+			TextSize = 15,
 			Truncate = true,
 		}, row)
 		newLabel({
 			Name = "Description",
-			Size = UDim2.new(widthScale, 0, 0, 14),
-			Position = UDim2.new(0, 0, 0, 17),
+			Size = UDim2.new(widthScale, 0, 0, 16),
+			Position = UDim2.new(0, 0, 0, 21),
 			Text = description,
 			TextColor3 = COLORS.TextMuted,
-			TextSize = 11,
+			TextSize = 13,
 			Truncate = true,
 		}, row)
 	end
@@ -610,18 +610,18 @@ function Library:CreateWindow(opts)
 		local flag = o.Flag
 		local currentOptions = o.Options or {}
 
-		local row = newFrame({Name = "DropdownRow", Size = UDim2.new(1, 0, 0, 50), BackgroundTransparency = 1}, body)
+		local row = newFrame({Name = "DropdownRow", Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
 		addRowHeader(row, rowTitle, description, 0.5)
 		registerRow(entry, row, rowTitle .. " " .. description)
 
 		local dropdownBtn = newButton({
 			Name = "Dropdown",
-			Size = UDim2.new(0.46, 0, 0, 28),
+			Size = UDim2.new(0.46, 0, 0, 36),
 			Position = UDim2.new(0.54, 0, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = COLORS.Field,
-			Corner = 6,
+			Corner = 7,
 		}, row)
 		stroke(dropdownBtn, COLORS.PanelBorder, 1)
 		addHover(dropdownBtn, COLORS.Field, COLORS.FieldHover)
@@ -640,10 +640,10 @@ function Library:CreateWindow(opts)
 		initFlag(flag, currentOptions[selectedIndex])
 
 		local valueLabel = newLabel({
-			Size = UDim2.new(1, -34, 1, 0),
-			Position = UDim2.new(0, 10, 0, 0),
+			Size = UDim2.new(1, -38, 1, 0),
+			Position = UDim2.new(0, 12, 0, 0),
 			Text = currentOptions[selectedIndex] or "",
-			TextSize = 12,
+			TextSize = 14,
 			Truncate = true,
 		}, dropdownBtn)
 
@@ -651,7 +651,7 @@ function Library:CreateWindow(opts)
 		addDivider(row)
 
 		local listFrame
-		local ROW_HEIGHT = 26
+		local ROW_HEIGHT = 32
 
 		local function closeList()
 			if not listFrame then return end
@@ -702,7 +702,7 @@ function Library:CreateWindow(opts)
 			listFrame = newFrame({
 				Name = "DropdownList",
 				BackgroundColor3 = COLORS.Field,
-				Corner = 6,
+				Corner = 7,
 				ClipsDescendants = true,
 			}, overlay)
 			listFrame.ZIndex = 201
@@ -728,7 +728,7 @@ function Library:CreateWindow(opts)
 					Size = UDim2.new(1, 0, 0, ROW_HEIGHT),
 					BackgroundColor3 = baseColor,
 					Text = optionText,
-					TextSize = 12,
+					TextSize = 14,
 					TextColor3 = isSelected and COLORS.Accent or COLORS.TextPrimary,
 				}, listFrame)
 				optionBtn.LayoutOrder = i
@@ -738,8 +738,8 @@ function Library:CreateWindow(opts)
 				addHover(optionBtn, baseColor, COLORS.SelectedBg)
 
 				local optionPadding = Instance.new("UIPadding")
-				optionPadding.PaddingLeft = UDim.new(0, 10)
-				optionPadding.PaddingRight = UDim.new(0, 10)
+				optionPadding.PaddingLeft = UDim.new(0, 12)
+				optionPadding.PaddingRight = UDim.new(0, 12)
 				optionPadding.Parent = optionBtn
 
 				optionBtn.MouseButton1Click:Connect(function()
@@ -786,49 +786,49 @@ function Library:CreateWindow(opts)
 		local step = o.Step or 1
 		local suffix = o.Suffix or ""
 
-		local row = newFrame({Name = "SliderRow", Size = UDim2.new(1, 0, 0, 58), BackgroundTransparency = 1}, body)
+		local row = newFrame({Name = "SliderRow", Size = UDim2.new(1, 0, 0, 68), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
 		addRowHeader(row, rowTitle, description, 0.6)
 		registerRow(entry, row, rowTitle .. " " .. description)
 
 		local valueLabel = newLabel({
-			Size = UDim2.new(0.4, -4, 0, 15),
+			Size = UDim2.new(0.4, -4, 0, 18),
 			Position = UDim2.new(0.6, 4, 0, 0),
 			Text = "",
-			TextSize = 12,
+			TextSize = 14,
 			TextColor3 = COLORS.TextMuted,
 			TextXAlignment = Enum.TextXAlignment.Right,
 		}, row)
 
 		local sliderTrack = newFrame({
 			Name = "SliderTrack",
-			Size = UDim2.new(1, 0, 0, 6),
-			Position = UDim2.new(0, 0, 0, 40),
+			Size = UDim2.new(1, 0, 0, 8),
+			Position = UDim2.new(0, 0, 0, 46),
 			BackgroundColor3 = COLORS.ToggleOff,
-			Corner = 3,
+			Corner = 4,
 		}, row)
 
 		local fill = newFrame({
 			Name = "SliderFill",
 			Size = UDim2.new(0, 0, 1, 0),
 			BackgroundColor3 = COLORS.Accent,
-			Corner = 3,
+			Corner = 4,
 		}, sliderTrack)
 
 		local knob = newFrame({
 			Name = "SliderKnob",
-			Size = UDim2.new(0, 14, 0, 14),
+			Size = UDim2.new(0, 18, 0, 18),
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.new(0, 0, 0.5, 0),
 			BackgroundColor3 = COLORS.Knob,
-			Corner = 7,
+			Corner = 9,
 		}, sliderTrack)
 
 		local dragCatcher = Instance.new("TextButton")
 		dragCatcher.Name = "SliderDragCatcher"
 		dragCatcher.BackgroundTransparency = 1
-		dragCatcher.Size = UDim2.new(1, 0, 0, 20)
-		dragCatcher.Position = UDim2.new(0, 0, 0.5, -10)
+		dragCatcher.Size = UDim2.new(1, 0, 0, 26)
+		dragCatcher.Position = UDim2.new(0, 0, 0.5, -13)
 		dragCatcher.Text = ""
 		dragCatcher.Parent = sliderTrack
 
@@ -990,9 +990,9 @@ function Library:CreateWindow(opts)
 		keybindCounter = keybindCounter + 1
 		local id = o.Flag or ("Keybind" .. keybindCounter)
 
-		local row = newFrame({Name = "KeybindRow", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1}, body)
+		local row = newFrame({Name = "KeybindRow", Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
-		addRowHeader(row, rowTitle, description, 0.6)
+		addRowHeader(row, rowTitle, description, 0.55)
 		registerRow(entry, row, rowTitle .. " " .. description)
 
 		-- tecla inicial: salva no arquivo > Default > None
@@ -1010,13 +1010,13 @@ function Library:CreateWindow(opts)
 
 		local keyBtn = newButton({
 			Name = "KeybindButton",
-			Size = UDim2.new(0, 90, 0, 26),
-			Position = UDim2.new(1, -90, 0.5, 0),
+			Size = UDim2.new(0, 110, 0, 34),
+			Position = UDim2.new(1, -110, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = COLORS.Field,
 			Text = keyDisplayName(startKey),
-			TextSize = 12,
-			Corner = 6,
+			TextSize = 14,
+			Corner = 7,
 		}, row)
 		stroke(keyBtn, COLORS.PanelBorder, 1)
 		addHover(keyBtn, COLORS.Field, COLORS.FieldHover)
@@ -1105,7 +1105,7 @@ function Library:CreateWindow(opts)
 	local function setToggleVisual(toggleBg, knob, isOn)
 		local info = TweenInfo.new(0.15)
 		TweenService:Create(knob, info, {
-			Position = isOn and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+			Position = isOn and UDim2.new(1, -23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
 			BackgroundColor3 = isOn and COLORS.AccentDark or COLORS.Knob, -- track branco => knob escuro
 		}):Play()
 		TweenService:Create(toggleBg, info, {BackgroundColor3 = isOn and COLORS.ToggleOn or COLORS.ToggleOff}):Play()
@@ -1116,7 +1116,7 @@ function Library:CreateWindow(opts)
 		local flag = o.Flag
 		local requiresKey = o.RequiresKey and keyEnabled
 
-		local row = newFrame({Name = "ToggleRow", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1}, body)
+		local row = newFrame({Name = "ToggleRow", Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
 		addRowHeader(row, rowTitle, description, 0.75)
 		registerRow(entry, row, rowTitle .. " " .. description)
@@ -1127,21 +1127,21 @@ function Library:CreateWindow(opts)
 
 		local toggleBg = newFrame({
 			Name = "ToggleBg",
-			Size = UDim2.new(0, 40, 0, 20),
-			Position = UDim2.new(1, -40, 0.5, 0),
+			Size = UDim2.new(0, 48, 0, 26),
+			Position = UDim2.new(1, -48, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = isOn and COLORS.ToggleOn or COLORS.ToggleOff,
-			Corner = 10,
+			Corner = 13,
 		}, row)
 		stroke(toggleBg, COLORS.PanelBorder, 1)
 
 		local knob = newFrame({
 			Name = "Knob",
-			Size = UDim2.new(0, 16, 0, 16),
-			Position = isOn and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+			Size = UDim2.new(0, 20, 0, 20),
+			Position = isOn and UDim2.new(1, -23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = isOn and COLORS.AccentDark or COLORS.Knob,
-			Corner = 8,
+			Corner = 10,
 		}, toggleBg)
 
 		local clickCatcher = Instance.new("TextButton")
@@ -1194,45 +1194,45 @@ function Library:CreateWindow(opts)
 	local function addTextbox(body, entry, o)
 		local rowTitle, description = o.Title or "Input", o.Description or ""
 
-		local row = newFrame({Name = "TextboxRow", Size = UDim2.new(1, 0, 0, 66), BackgroundTransparency = 1}, body)
+		local row = newFrame({Name = "TextboxRow", Size = UDim2.new(1, 0, 0, 78), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
 		addRowHeader(row, rowTitle, description, 1)
 		registerRow(entry, row, rowTitle .. " " .. description)
 
 		local inputBox = newFrame({
 			Name = "TextboxField",
-			Size = UDim2.new(1, -84, 0, 28),
-			Position = UDim2.new(0, 0, 0, 34),
+			Size = UDim2.new(1, -96, 0, 36),
+			Position = UDim2.new(0, 0, 0, 40),
 			BackgroundColor3 = COLORS.Field,
-			Corner = 6,
+			Corner = 7,
 		}, row)
 		stroke(inputBox, COLORS.PanelBorder, 1)
 
 		local textBox = Instance.new("TextBox")
 		textBox.Name = "Input"
 		textBox.BackgroundTransparency = 1
-		textBox.Size = UDim2.new(1, -16, 1, 0)
-		textBox.Position = UDim2.new(0, 8, 0, 0)
+		textBox.Size = UDim2.new(1, -20, 1, 0)
+		textBox.Position = UDim2.new(0, 10, 0, 0)
 		textBox.FontFace = FONTS.Body
 		textBox.PlaceholderText = o.Placeholder or ""
 		textBox.PlaceholderColor3 = COLORS.TextMuted
 		textBox.Text = o.Default or ""
 		textBox.TextColor3 = COLORS.TextPrimary
-		textBox.TextSize = 13
+		textBox.TextSize = 14
 		textBox.TextXAlignment = Enum.TextXAlignment.Left
 		textBox.ClearTextOnFocus = false
 		textBox.Parent = inputBox
 
 		local actionBtn = newButton({
 			Name = "ActionButton",
-			Size = UDim2.new(0, 76, 0, 28),
-			Position = UDim2.new(1, -76, 0, 34),
+			Size = UDim2.new(0, 88, 0, 36),
+			Position = UDim2.new(1, -88, 0, 40),
 			BackgroundColor3 = COLORS.Accent,
 			Text = o.ButtonText or "OK",
 			Font = Enum.Font.GothamBold,
 			TextColor3 = COLORS.AccentDark,
-			TextSize = 13,
-			Corner = 6,
+			TextSize = 14,
+			Corner = 7,
 		}, row)
 		addHover(actionBtn, COLORS.Accent, Color3.fromRGB(215, 215, 220))
 
@@ -1255,20 +1255,20 @@ function Library:CreateWindow(opts)
 	local function addButton(body, entry, o)
 		local rowTitle, description = o.Title or "Button", o.Description or ""
 
-		local row = newFrame({Name = "ButtonRow", Size = UDim2.new(1, 0, 0, 46), BackgroundTransparency = 1}, body)
+		local row = newFrame({Name = "ButtonRow", Size = UDim2.new(1, 0, 0, 56), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
-		addRowHeader(row, rowTitle, description, 0.6)
+		addRowHeader(row, rowTitle, description, 0.55)
 		registerRow(entry, row, rowTitle .. " " .. description)
 
 		local btn = newButton({
 			Name = "ActionButton",
-			Size = UDim2.new(0, 90, 0, 26),
-			Position = UDim2.new(1, -90, 0.5, 0),
+			Size = UDim2.new(0, 110, 0, 34),
+			Position = UDim2.new(1, -110, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = COLORS.Field,
 			Text = o.ButtonText or "Run",
-			TextSize = 12,
-			Corner = 6,
+			TextSize = 14,
+			Corner = 7,
 		}, row)
 		stroke(btn, o.Danger and COLORS.Danger or COLORS.PanelBorder, 1)
 		addHover(btn, COLORS.Field, o.Danger and COLORS.DangerHover or COLORS.FieldHover)
@@ -1282,7 +1282,7 @@ function Library:CreateWindow(opts)
 
 	-- ---------- LABEL / SEPARATOR ----------
 	local function addLabel(body, entry, o)
-		local height = o.Height or 20
+		local height = o.Height or 24
 		local row = newFrame({Name = "LabelRow", Size = UDim2.new(1, 0, 0, height), BackgroundTransparency = 1}, body)
 		row.LayoutOrder = nextOrder(body)
 		registerRow(entry, row, o.Text or "")
@@ -1291,7 +1291,7 @@ function Library:CreateWindow(opts)
 			Size = UDim2.new(1, 0, 1, 0),
 			Text = o.Text or "",
 			Font = o.Bold and Enum.Font.GothamBold or nil,
-			TextSize = o.Bold and 13 or 11,
+			TextSize = o.Bold and 15 or 13,
 			TextColor3 = o.Color or (o.Muted and COLORS.TextMuted or COLORS.TextPrimary),
 			TextWrapped = o.Wrap or false,
 			Truncate = not o.Wrap,
@@ -1311,14 +1311,14 @@ function Library:CreateWindow(opts)
 
 	-- ---------- KEY INPUT (status + textbox) ----------
 	local function addKeyInput(body, entry, o)
-		local statusRow = newFrame({Name = "KeyStatusRow", Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1}, body)
+		local statusRow = newFrame({Name = "KeyStatusRow", Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1}, body)
 		statusRow.LayoutOrder = nextOrder(body)
 		registerRow(entry, statusRow, "key status")
 
 		local statusLabel = newLabel({
 			Size = UDim2.new(1, 0, 1, 0),
 			Text = "",
-			TextSize = 11,
+			TextSize = 13,
 		}, statusRow)
 
 		-- state: "valid" | "invalid" | "required" | "disabled"
@@ -1540,10 +1540,10 @@ function Library:CreateWindow(opts)
 		textPad.Parent = textHolder
 
 		local titleLabel = newLabel({
-			Size = UDim2.new(1, 0, 0, 15),
+			Size = UDim2.new(1, 0, 0, 17),
 			Text = tostring(toastTitle or ""),
 			Font = Enum.Font.GothamBold,
-			TextSize = 13,
+			TextSize = 14,
 		}, textHolder)
 		titleLabel.ZIndex = 300
 
@@ -1552,7 +1552,7 @@ function Library:CreateWindow(opts)
 				Size = UDim2.new(1, 0, 0, 0),
 				Text = tostring(message),
 				TextColor3 = COLORS.TextMuted,
-				TextSize = 11,
+				TextSize = 12,
 				TextWrapped = true,
 			}, textHolder)
 			messageLabel.AutomaticSize = Enum.AutomaticSize.Y
@@ -1674,7 +1674,7 @@ function Library:CreateWindow(opts)
 	-- ================== SIDEBAR ==================
 	local sidebar = newFrame({
 		Name = "Sidebar",
-		Size = UDim2.new(0, 200, 1, 0),
+		Size = UDim2.new(0, 210, 1, 0),
 		BackgroundColor3 = COLORS.Sidebar,
 	}, mainFrame)
 	corner(sidebar, 12)
@@ -1685,10 +1685,18 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = COLORS.Sidebar,
 	}, sidebar)
 
+	-- Linha vertical separando a sidebar do conteúdo (igual ao hub).
+	newFrame({
+		Name = "SidebarEdge",
+		Size = UDim2.new(0, 1, 1, 0),
+		Position = UDim2.new(1, -1, 0, 0),
+		BackgroundColor3 = COLORS.Divider,
+	}, sidebar)
+
 	local logoHolder = newFrame({
 		Name = "LogoHolder",
-		Size = UDim2.new(1, -28, 0, 50),
-		Position = UDim2.new(0, 14, 0, 14),
+		Size = UDim2.new(1, -32, 0, 50),
+		Position = UDim2.new(0, 16, 0, 14),
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -1734,15 +1742,15 @@ function Library:CreateWindow(opts)
 
 	newFrame({
 		Name = "SidebarDivider",
-		Size = UDim2.new(1, -28, 0, 1),
-		Position = UDim2.new(0, 14, 0, 74),
+		Size = UDim2.new(1, -32, 0, 1),
+		Position = UDim2.new(0, 16, 0, 76),
 		BackgroundColor3 = COLORS.Divider,
 	}, sidebar)
 
 	local navList = newFrame({
 		Name = "NavList",
-		Size = UDim2.new(1, -22, 1, -100),
-		Position = UDim2.new(0, 11, 0, 88),
+		Size = UDim2.new(1, -22, 1, -104),
+		Position = UDim2.new(0, 11, 0, 90),
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -1754,8 +1762,8 @@ function Library:CreateWindow(opts)
 	-- ================== CONTAINER DIREITO ==================
 	local rightContainer = newFrame({
 		Name = "RightContainer",
-		Size = UDim2.new(1, -200, 1, 0),
-		Position = UDim2.new(0, 200, 0, 0),
+		Size = UDim2.new(1, -210, 1, 0),
+		Position = UDim2.new(0, 210, 0, 0),
 		BackgroundTransparency = 1,
 	}, mainFrame)
 
@@ -1819,7 +1827,7 @@ function Library:CreateWindow(opts)
 			Size = UDim2.new(0, 0, 1, 0),
 			Text = title,
 			Font = Enum.Font.GothamBold,
-			TextSize = 18,
+			TextSize = 20,
 		}, titleHolder)
 		pageTitleLabel.AutomaticSize = Enum.AutomaticSize.X
 		pageTitleLabel.LayoutOrder = 1
@@ -1829,15 +1837,15 @@ function Library:CreateWindow(opts)
 			Size = UDim2.new(0, 0, 1, 0),
 			Text = "",
 			TextColor3 = COLORS.TextMuted,
-			TextSize = 12,
+			TextSize = 13,
 		}, titleHolder)
 		pageCounterLabel.AutomaticSize = Enum.AutomaticSize.X
 		pageCounterLabel.LayoutOrder = 2
 
 		local searchBox = newFrame({
 			Name = "SearchBox",
-			Size = UDim2.new(0, 180, 0, 28),
-			Position = UDim2.new(1, -260, 0.5, 0),
+			Size = UDim2.new(0, 190, 0, 30),
+			Position = UDim2.new(1, -270, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = COLORS.Field,
 			Corner = 7,
@@ -1864,15 +1872,15 @@ function Library:CreateWindow(opts)
 		searchInput.PlaceholderColor3 = COLORS.TextMuted
 		searchInput.Text = ""
 		searchInput.TextColor3 = COLORS.TextPrimary
-		searchInput.TextSize = 13
+		searchInput.TextSize = 14
 		searchInput.TextXAlignment = Enum.TextXAlignment.Left
 		searchInput.ClearTextOnFocus = false
 		searchInput.Parent = searchBox
 
 		local minimizeBtn = newButton({
 			Name = "MinimizeBtn",
-			Size = UDim2.new(0, 28, 0, 28),
-			Position = UDim2.new(1, -60, 0.5, 0),
+			Size = UDim2.new(0, 30, 0, 30),
+			Position = UDim2.new(1, -66, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = COLORS.Field,
 			BackgroundTransparency = 1,
@@ -1892,8 +1900,8 @@ function Library:CreateWindow(opts)
 
 		local closeBtn = newButton({
 			Name = "CloseBtn",
-			Size = UDim2.new(0, 28, 0, 28),
-			Position = UDim2.new(1, -28, 0.5, 0),
+			Size = UDim2.new(0, 30, 0, 30),
+			Position = UDim2.new(1, -30, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = COLORS.Field,
 			BackgroundTransparency = 1,
@@ -1935,7 +1943,7 @@ function Library:CreateWindow(opts)
 	-- ================== TAB BAR ==================
 	local tabBar = newFrame({
 		Name = "TabBar",
-		Size = UDim2.new(1, -28, 0, 28),
+		Size = UDim2.new(1, -28, 0, 32),
 		Position = UDim2.new(0, 14, 0, 58),
 		BackgroundTransparency = 1,
 	}, rightContainer)
@@ -1943,7 +1951,7 @@ function Library:CreateWindow(opts)
 	newFrame({
 		Name = "TabBarDivider",
 		Size = UDim2.new(1, -28, 0, 1),
-		Position = UDim2.new(0, 14, 0, 90),
+		Position = UDim2.new(0, 14, 0, 92),
 		BackgroundColor3 = COLORS.Divider,
 	}, rightContainer)
 
@@ -1951,8 +1959,8 @@ function Library:CreateWindow(opts)
 	contentCanvas = Instance.new("CanvasGroup")
 	contentCanvas.Name = "ContentCanvas"
 	contentCanvas.BackgroundTransparency = 1
-	contentCanvas.Size = UDim2.new(1, -28, 1, -108)
-	contentCanvas.Position = UDim2.new(0, 14, 0, 100)
+	contentCanvas.Size = UDim2.new(1, -28, 1, -112)
+	contentCanvas.Position = UDim2.new(0, 14, 0, 104)
 	contentCanvas.GroupTransparency = 0
 	contentCanvas.Parent = rightContainer
 
@@ -1991,31 +1999,31 @@ function Library:CreateWindow(opts)
 
 	local placeholderTitle = newLabel({
 		Name = "PlaceholderTitle",
-		Size = UDim2.new(1, 0, 0, 22),
+		Size = UDim2.new(1, 0, 0, 24),
 		Position = UDim2.new(0, 0, 0, 60),
 		Text = "",
 		Font = Enum.Font.GothamBold,
-		TextSize = 18,
+		TextSize = 20,
 		TextXAlignment = Enum.TextXAlignment.Center,
 	}, placeholderPage)
 
 	newLabel({
 		Name = "PlaceholderSubtitle",
-		Size = UDim2.new(1, 0, 0, 16),
-		Position = UDim2.new(0, 0, 0, 86),
+		Size = UDim2.new(1, 0, 0, 18),
+		Position = UDim2.new(0, 0, 0, 90),
 		Text = "Em construção — em breve.",
 		TextColor3 = COLORS.TextMuted,
-		TextSize = 13,
+		TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Center,
 	}, placeholderPage)
 
 	local noResultsLabel = newLabel({
 		Name = "NoResults",
-		Size = UDim2.new(1, 0, 0, 20),
+		Size = UDim2.new(1, 0, 0, 22),
 		Position = UDim2.new(0, 0, 0, 40),
 		Text = "Nenhum resultado para a busca.",
 		TextColor3 = COLORS.TextMuted,
-		TextSize = 13,
+		TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Center,
 	}, contentCanvas)
 	noResultsLabel.Visible = false
@@ -2119,7 +2127,7 @@ function Library:CreateWindow(opts)
 
 		local headerBar = newFrame({
 			Name = "HeaderBar",
-			Size = UDim2.new(1, 0, 0, 38),
+			Size = UDim2.new(1, 0, 0, 46),
 			BackgroundColor3 = COLORS.CardHeaderBg,
 			Corner = 10,
 		}, card)
@@ -2132,26 +2140,24 @@ function Library:CreateWindow(opts)
 			BackgroundColor3 = COLORS.CardHeaderBg,
 		}, headerBar)
 
+		createIcon({
+			Size = UDim2.new(0, 24, 0, 24),
+			Position = UDim2.new(0, 18, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			AssetId = co.Icon,
+			FallbackText = co.IconFallback or "⚙️",
+			TextSize = 18,
+			ImageColor3 = COLORS.CardHeader,
+		}, headerBar)
 
-
-createIcon({
-	Size = UDim2.new(0, 22, 0, 22),
-	Position = UDim2.new(0, 16, 0.5, 0),
-	AnchorPoint = Vector2.new(0, 0.5),
-	AssetId = co.Icon,
-	FallbackText = co.IconFallback or "⚙️",
-	TextSize = 17,
-	ImageColor3 = COLORS.CardHeader,
-}, headerBar)
-
-newLabel({
-	Size = UDim2.new(1, -62, 1, 0),
-	Position = UDim2.new(0, 46, 0, 0),
-	Text = cardTitle,
-	Font = Enum.Font.GothamBold,
-	TextColor3 = COLORS.CardHeader,
-	TextSize = 12,
-}, headerBar)
+		newLabel({
+			Size = UDim2.new(1, -66, 1, 0),
+			Position = UDim2.new(0, 52, 0, 0),
+			Text = cardTitle,
+			Font = Enum.Font.GothamBold,
+			TextColor3 = COLORS.CardHeader,
+			TextSize = 14,
+		}, headerBar)
 
 		local body = newFrame({
 			Name = "Body",
@@ -2163,14 +2169,14 @@ newLabel({
 
 		local bodyLayout = Instance.new("UIListLayout")
 		bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		bodyLayout.Padding = UDim.new(0, 4)
+		bodyLayout.Padding = UDim.new(0, 6)
 		bodyLayout.Parent = body
 
 		local bodyPadding = Instance.new("UIPadding")
-		bodyPadding.PaddingLeft = UDim.new(0, 16)
-		bodyPadding.PaddingRight = UDim.new(0, 16)
-		bodyPadding.PaddingTop = UDim.new(0, 4)
-		bodyPadding.PaddingBottom = UDim.new(0, 14)
+		bodyPadding.PaddingLeft = UDim.new(0, 18)
+		bodyPadding.PaddingRight = UDim.new(0, 18)
+		bodyPadding.PaddingTop = UDim.new(0, 6)
+		bodyPadding.PaddingBottom = UDim.new(0, 16)
 		bodyPadding.Parent = body
 
 		local entry = {card = card, title = string.lower(cardTitle), rows = {}}
@@ -2246,7 +2252,7 @@ newLabel({
 		-- Item da sidebar
 		local navBtn = newButton({
 			Name = page.Name .. "Nav",
-			Size = UDim2.new(1, 0, 0, 40),
+			Size = UDim2.new(1, 0, 0, 46),
 			BackgroundColor3 = COLORS.Sidebar,
 			Text = "",
 			Corner = 10,
@@ -2257,8 +2263,8 @@ newLabel({
 		navStroke.Transparency = 1
 
 		local navIcon = createIcon({
-			Size = UDim2.new(0, 24, 0, 24),
-			Position = UDim2.new(0, 10, 0.5, 0),
+			Size = UDim2.new(0, 26, 0, 26),
+			Position = UDim2.new(0, 12, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			AssetId = po.Icon,
 			FallbackText = po.IconFallback or "•",
@@ -2267,12 +2273,12 @@ newLabel({
 		}, navBtn)
 
 		local navLabel = newLabel({
-			Size = UDim2.new(1, -48, 1, 0),
-			Position = UDim2.new(0, 42, 0, 0),
+			Size = UDim2.new(1, -52, 1, 0),
+			Position = UDim2.new(0, 46, 0, 0),
 			Text = page.Name,
 			Font = Enum.Font.GothamBold,
 			TextColor3 = COLORS.TextMuted,
-			TextSize = 15,
+			TextSize = 16,
 		}, navBtn)
 
 		page.Nav = {Button = navBtn, Label = navLabel, Icon = navIcon, Stroke = navStroke}
@@ -2306,7 +2312,7 @@ newLabel({
 		local tabLayout = Instance.new("UIListLayout")
 		tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		tabLayout.FillDirection = Enum.FillDirection.Horizontal
-		tabLayout.Padding = UDim.new(0, 18)
+		tabLayout.Padding = UDim.new(0, 20)
 		tabLayout.Parent = page.TabBarFrame
 
 		function page:AddTab(to)
@@ -2331,7 +2337,7 @@ newLabel({
 			btn.FontFace = FONTS.Body
 			btn.Text = tabName
 			btn.TextColor3 = COLORS.TextMuted
-			btn.TextSize = 14
+			btn.TextSize = 16
 			btn.Parent = holder
 
 			local underline = newFrame({
@@ -2484,7 +2490,7 @@ newLabel({
 	-- ================== ATALHOS: API + LISTA (Ctrl+B) ==================
 	local kbViewer = newFrame({
 		Name = "KeybindViewer",
-		Size = UDim2.new(0, 320, 0, 380),
+		Size = UDim2.new(0, 340, 0, 400),
 		Position = UDim2.new(0.5, 0, 0.5, 0),
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		BackgroundColor3 = COLORS.Background,
@@ -2500,7 +2506,7 @@ newLabel({
 		Position = UDim2.new(0, 16, 0, 0),
 		Text = "Keybind List",
 		Font = Enum.Font.GothamBold,
-		TextSize = 16,
+		TextSize = 17,
 	}, kbViewer)
 
 	local kbClose = newButton({
@@ -2551,7 +2557,7 @@ newLabel({
 		Position = UDim2.new(0, 12, 1, -24),
 		Text = "Ctrl+B abre/fecha esta lista",
 		TextColor3 = COLORS.TextMuted,
-		TextSize = 11,
+		TextSize = 12,
 	}, kbViewer)
 
 	refreshKeybindViewer = function()
@@ -2574,7 +2580,7 @@ newLabel({
 				Size = UDim2.new(1, 0, 0, 30),
 				Text = "Nenhum atalho registrado.",
 				TextColor3 = COLORS.TextMuted,
-				TextSize = 12,
+				TextSize = 13,
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}, kbList)
 			return
@@ -2585,24 +2591,24 @@ newLabel({
 			local on = kb.enabled ~= false
 			local row = newFrame({
 				Name = "Row",
-				Size = UDim2.new(1, 0, 0, 32),
+				Size = UDim2.new(1, 0, 0, 34),
 				BackgroundColor3 = COLORS.Card,
 				Corner = 8,
 			}, kbList)
 			row.LayoutOrder = i
 
 			newLabel({
-				Size = UDim2.new(1, -100, 1, 0),
+				Size = UDim2.new(1, -104, 1, 0),
 				Position = UDim2.new(0, 10, 0, 0),
 				Text = tostring(kb.name or item.id) .. (on and "" or " (off)"),
 				TextColor3 = on and COLORS.TextPrimary or COLORS.TextMuted,
-				TextSize = 12,
+				TextSize = 13,
 				Truncate = true,
 			}, row)
 
 			local badge = newFrame({
-				Size = UDim2.new(0, 78, 0, 22),
-				Position = UDim2.new(1, -86, 0.5, 0),
+				Size = UDim2.new(0, 82, 0, 24),
+				Position = UDim2.new(1, -90, 0.5, 0),
 				AnchorPoint = Vector2.new(0, 0.5),
 				BackgroundColor3 = COLORS.Field,
 				Corner = 6,
@@ -2612,7 +2618,7 @@ newLabel({
 				Size = UDim2.new(1, 0, 1, 0),
 				Text = keyDisplayName(kb.key),
 				TextColor3 = on and COLORS.Accent or COLORS.TextMuted,
-				TextSize = 11,
+				TextSize = 12,
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}, badge)
 		end
