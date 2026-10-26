@@ -1,5 +1,5 @@
 --[[
-	NERV UI Library v1.3.2 (Compact Sidebar)
+	NERV UI Library v1.3.2 (Compact Sidebar + No Tab Underline)
 	Biblioteca de UI pra executor (Roblox). Hospede este arquivo no GitHub e use:
 
 		local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/USUARIO/REPO/main/NervLib.lua"))()
@@ -80,7 +80,6 @@ local playerGui = player:WaitForChild("PlayerGui")
 local env = (getgenv and getgenv()) or _G
 
 -- ================== PALETA ==================
--- Dá pra sobrescrever antes do CreateWindow: Library.Colors.Accent = Color3.fromRGB(...)
 local COLORS = {
 	Background   = Color3.fromRGB(13, 16, 23),
 	Panel        = Color3.fromRGB(20, 24, 34),
@@ -93,7 +92,7 @@ local COLORS = {
 	FieldHover   = Color3.fromRGB(30, 36, 52),
 	TextPrimary  = Color3.fromRGB(235, 238, 245),
 	TextMuted    = Color3.fromRGB(140, 148, 168),
-	Accent       = Color3.fromRGB(255, 255, 255), -- dica: Color3.fromRGB(88, 160, 255) pra ficar azul como o hub
+	Accent       = Color3.fromRGB(255, 255, 255),
 	AccentDark   = Color3.fromRGB(20, 20, 24),
 	ToggleOff    = Color3.fromRGB(15, 18, 27),
 	ToggleOn     = Color3.fromRGB(255, 255, 255),
@@ -111,21 +110,15 @@ local Library = {
 	Version = "1.3.2",
 	Colors = COLORS,
 	CacheDir = "NervLib",
-
-	-- Repositório de onde saem ícones ("gh:...") e fontes. Troque antes do CreateWindow.
 	Github = {
 		User   = "ojoaool",
 		Repo   = "wood-assets",
-		Branch = "main", -- dica: use um hash de commit pra evitar cache velho do GitHub
+		Branch = "main",
 	},
-
-	-- Arquivos de fonte dentro do repositório acima.
 	FontFiles = {
 		Title = {Family = "ComicSansBold", File = "nova_ComicSansBold.ttf"},
 		Body  = {Family = "ComicNeueBold", File = "ComicNeue-Bold.ttf"},
 	},
-
-	-- Ícones internos da biblioteca (rbxassetid ou "gh:...").
 	Icons = {
 		Search      = "rbxassetid://5107220207",
 		Minimize    = "rbxassetid://78357418744409",
@@ -134,9 +127,6 @@ local Library = {
 	},
 }
 
--- ================== GITHUB (ÍCONES + FONTES + MASCOTE) ==================
--- Todas as funções aceitam um repositório opcional `g` ({User, Repo, Branch});
--- sem ele usam Library.Github.
 local function rawUrl(repoPath, g)
 	g = g or Library.Github
 	return string.format("https://raw.githubusercontent.com/%s/%s/%s/%s", g.User, g.Repo, g.Branch or "main", repoPath)
@@ -153,11 +143,9 @@ local function ensureFolders(fullPath)
 	end
 end
 
--- Baixa "icons/x.png" para workspace/<CacheDir>/<user>_<repo>/icons/x.png (com cache). Retorna caminho local ou nil.
 local function downloadToCache(repoPath, g)
 	if not (writefile and isfile) then return nil end
 	g = g or Library.Github
-	-- o cache inclui user/repo pra não misturar arquivos de repositórios diferentes
 	local localPath = string.format("%s/%s_%s/%s", Library.CacheDir, g.User, g.Repo, repoPath)
 	ensureFolders(localPath:match("^(.*)/[^/]+$") or Library.CacheDir)
 
@@ -171,7 +159,6 @@ local function downloadToCache(repoPath, g)
 	return localPath
 end
 
--- ---------- Fontes ----------
 local FONTS = {
 	Title = Font.fromEnum(Enum.Font.GothamBold),
 	Body  = Font.fromEnum(Enum.Font.GothamMedium),
@@ -209,7 +196,6 @@ local function ensureFonts()
 	FONTS.Body  = loadFont(Library.FontFiles.Body, Enum.Font.GothamMedium)
 end
 
--- ================== HELPERS GERAIS ==================
 local function trim(text)
 	return (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
@@ -270,7 +256,6 @@ local function newFrame(props, parent)
 	return f
 end
 
--- Regra de fontes: o que é pedido como GothamBold vira a fonte de título; o resto vira a fonte base.
 local function fontFor(requestedFont)
 	if requestedFont == Enum.Font.GothamBold then
 		return FONTS.Title
@@ -316,8 +301,6 @@ local function newButton(props, parent)
 	return b
 end
 
--- ---------- Ícones ----------
--- Aceita número, "rbxassetid://..." ou "gh:caminho". Sem asset (ou falha no download) => texto/emoji.
 local assetCache = {}
 
 local function normalizeAsset(spec)
@@ -331,7 +314,6 @@ end
 
 local function resolveGithubAsset(repoPath, g)
 	g = g or Library.Github
-	-- a chave inclui o repositório pra não misturar arquivos com o mesmo caminho
 	local key = g.User .. "/" .. g.Repo .. "/" .. repoPath
 	if assetCache[key] then return assetCache[key] end
 	local path = downloadToCache(repoPath, g)
@@ -373,7 +355,6 @@ local function createIcon(props, parent)
 		}, img)
 
 		if spec:sub(1, 3) == "gh:" then
-			-- download assíncrono: o emoji aparece até a imagem chegar
 			task.spawn(function()
 				local asset = resolveGithubAsset(spec:sub(4))
 				if asset and img.Parent then
@@ -410,7 +391,6 @@ local function setIconColor(icon, color)
 	end
 end
 
--- Hover suave de cor de fundo (as conexões morrem junto com o botão).
 local function addHover(btn, normalColor, hoverColor)
 	local info = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	btn.MouseEnter:Connect(function()
@@ -421,7 +401,6 @@ local function addHover(btn, normalColor, hoverColor)
 	end)
 end
 
--- LayoutOrder por container (cada card tem sua própria contagem).
 local function nextOrder(parent)
 	local n = (parent:GetAttribute("RowCount") or 0) + 1
 	parent:SetAttribute("RowCount", n)
@@ -437,8 +416,6 @@ local function addDivider(parent)
 	}, parent)
 end
 
--- Esconde o divisor da última linha visível do card (a última não leva linha embaixo).
--- Considera só os elementos que TÊM um RowDivider.
 local function updateDividers(body)
 	local last, lastOrder = nil, -math.huge
 	for _, child in ipairs(body:GetChildren()) do
@@ -454,7 +431,6 @@ local function updateDividers(body)
 	end
 end
 
--- Chevron do dropdown: sempre gira 180° ao abrir/fechar.
 local function createChevron(parent)
 	local icon = createIcon({
 		Name = "Chevron",
@@ -474,7 +450,6 @@ local function createChevron(parent)
 	return icon, setOpen
 end
 
--- ================== JANELA ==================
 function Library:CreateWindow(opts)
 	opts = opts or {}
 	ensureFonts()
@@ -486,10 +461,9 @@ function Library:CreateWindow(opts)
 	local WINDOW_H = (opts.Size and opts.Size.Y) or 640
 	local FADE_SPEED = 0.18
 	local MAX_TOASTS = 4
-	local FIXED_SCALE = opts.Scale or 0.95 -- escala fixa da janela (limitada ao tamanho da tela)
-	local topExtra = 0 -- pixels que o mascote ocupa acima da janela (usado pra não cortar no topo da tela)
+	local FIXED_SCALE = opts.Scale or 0.95
+	local topExtra = 0
 
-	-- Instância única por Id: criar de novo descarrega a janela anterior.
 	env.__NervLibWindows = env.__NervLibWindows or {}
 	local previous = env.__NervLibWindows[windowId]
 	if previous and previous.Unload then
@@ -503,13 +477,11 @@ function Library:CreateWindow(opts)
 	local changedEvent = Instance.new("BindableEvent")
 	Window.Changed = changedEvent.Event
 
-	-- ---------- Conexões / limpeza ----------
 	local connections = {}
 	local function track(connection)
 		connections[#connections + 1] = connection
 		return connection
 	end
-	-- Desconecta e remove da lista (evita acumular conexões de atalhos já atribuídos).
 	local function untrack(connection)
 		if not connection then return end
 		pcall(function() connection:Disconnect() end)
@@ -517,9 +489,8 @@ function Library:CreateWindow(opts)
 		if idx then table.remove(connections, idx) end
 	end
 
-	-- Forward declarations (preenchidas mais abaixo)
 	local screenGui, mainFrame, overlay, overlayCatcher, uiScale, contentCanvas
-	local sidebar, navList -- usados pelo mascote
+	local sidebar, navList
 	local showNotification, updateActivePage, applySearch, setUiVisible, applyScale
 	local closeOpenDropdown
 	local unloaded = false
@@ -532,7 +503,6 @@ function Library:CreateWindow(opts)
 		end
 	end
 
-	-- ---------- Persistência (por flag) ----------
 	local configFile = opts.ConfigFile or ("NervLib_" .. (string.gsub(windowId, "[^%w_%-]", "_")) .. ".json")
 	local saveDisabled = false
 	local savedFlags = {}
@@ -547,7 +517,6 @@ function Library:CreateWindow(opts)
 	end)
 	Window.HadSavedConfig = next(savedFlags) ~= nil
 
-	-- Lê um valor salvo validando o tipo (e tratando corretamente o valor `false`).
 	local function saved(flag, default)
 		if not flag then return default end
 		local v = savedFlags[flag]
@@ -571,7 +540,6 @@ function Library:CreateWindow(opts)
 		end)
 	end
 
-	-- Debounce por task.delay: agrupa mudanças e grava 1x por segundo.
 	local function markConfigDirty()
 		configDirty = true
 		if saveScheduled then return end
@@ -582,7 +550,6 @@ function Library:CreateWindow(opts)
 		end)
 	end
 
-	-- Ponto único de "algo mudou": atualiza a flag, dispara o evento público e agenda o autosave.
 	local function setFlag(flag, value)
 		if not flag or unloaded then return end
 		Window.Flags[flag] = value
@@ -590,24 +557,20 @@ function Library:CreateWindow(opts)
 		markConfigDirty()
 	end
 
-	-- Valor inicial (restaurado ou padrão), sem disparar evento.
 	local function initFlag(flag, value)
 		if flag then Window.Flags[flag] = value end
 	end
 
-	-- ---------- Notificações ativas? (flag da página Settings, se existir) ----------
 	local function notificationsEnabled()
 		local v = Window.Flags["Settings.Notifications"]
 		if v == nil then v = savedFlags["Settings.Notifications"] end
 		return v ~= false
 	end
 
-	-- ================== COMPONENTES ==================
 	local function registerRow(entry, row, text)
 		entry.rows[#entry.rows + 1] = {frame = row, text = string.lower(text)}
 	end
 
-	-- Adiciona margem superior sutil (4px) para afastar o texto do divider anterior
 	local function addRowHeader(row, rowTitle, description, widthScale)
 		local rowPad = Instance.new("UIPadding")
 		rowPad.PaddingTop = UDim.new(0, 4)
@@ -631,7 +594,6 @@ function Library:CreateWindow(opts)
 		}, row)
 	end
 
-	-- ---------- DROPDOWN ----------
 	local function addDropdown(body, entry, o)
 		local rowTitle, description = o.Title or "Dropdown", o.Description or ""
 		local flag = o.Flag
@@ -653,7 +615,6 @@ function Library:CreateWindow(opts)
 		stroke(dropdownBtn, COLORS.PanelBorder, 1)
 		addHover(dropdownBtn, COLORS.Field, COLORS.FieldHover)
 
-		-- índice inicial: valor salvo > Default (valor ou índice) > 1
 		local startIndex = 1
 		local savedValue = flag and savedFlags[flag]
 		if type(savedValue) == "string" and findOptionIndex(currentOptions, savedValue, nil) then
@@ -700,7 +661,6 @@ function Library:CreateWindow(opts)
 			closeTween:Play()
 		end
 
-		-- Aplica uma seleção: atualiza texto, flag e callback (silent = não chama o callback).
 		local function commit(index, silent)
 			selectedIndex = index
 			local value = currentOptions[index]
@@ -714,8 +674,6 @@ function Library:CreateWindow(opts)
 			setChevronOpen(true)
 			overlayCatcher.Visible = true
 
-			-- O overlay vive dentro do mainFrame (herda o UIScale), então as medidas
-			-- absolutas (pixels da tela) são divididas pela escala atual.
 			local scale = uiScale.Scale
 			local targetHeight = #currentOptions * ROW_HEIGHT
 			local btnPos, btnSize = dropdownBtn.AbsolutePosition, dropdownBtn.AbsoluteSize
@@ -790,12 +748,10 @@ function Library:CreateWindow(opts)
 		function api:Get()
 			return currentOptions[selectedIndex], selectedIndex
 		end
-		-- silent = true não dispara o Callback (evita loop se Set for chamado dentro dele).
 		function api:Set(value, silent)
 			local index = findOptionIndex(currentOptions, value, nil)
 			if index then commit(index, silent) end
 		end
-		-- Troca a lista de opções (ex.: estágios que dependem de outro dropdown).
 		function api:SetOptions(newOptions, preferredValue, silent)
 			closeList()
 			currentOptions = newOptions or {}
@@ -806,7 +762,6 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ---------- SLIDER ----------
 	local function addSlider(body, entry, o)
 		local rowTitle, description = o.Title or "Slider", o.Description or ""
 		local flag = o.Flag
@@ -909,7 +864,6 @@ function Library:CreateWindow(opts)
 			end
 		end)
 
-		-- Movimento e soltar são globais: soltar o mouse fora da barrinha também encerra o arraste.
 		track(UserInputService.InputChanged:Connect(function(input)
 			if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement
 				or input.UserInputType == Enum.UserInputType.Touch) then
@@ -940,7 +894,6 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ---------- PROGRESS BAR ----------
 	local function addProgressBar(body, entry, o)
 		local rowTitle, description = o.Title or "Progress", o.Description or ""
 		local flag = o.Flag
@@ -1014,21 +967,18 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ---------- MULTI DROPDOWN ----------
 	local function addMultiDropdown(body, entry, o)
 		local rowTitle, description = o.Title or "Multi Select", o.Description or ""
 		local flag = o.Flag
 		local currentOptions = o.Options or {}
 		local selected = {}
 
-		-- Default: tabela, valor único ou nil
 		if type(o.Default) == "table" then
 			for _, v in ipairs(o.Default) do selected[v] = true end
 		elseif o.Default ~= nil then
 			selected[o.Default] = true
 		end
 
-		-- Restaurar salvo (array JSON)
 		local savedValue = flag and savedFlags[flag]
 		if type(savedValue) == "table" then
 			selected = {}
@@ -1119,7 +1069,6 @@ function Library:CreateWindow(opts)
 		local function toggleOption(opt)
 			selected[opt] = not selected[opt] or nil
 			commit()
-			-- atualiza visual do checkbox da linha
 			local rowRefs = optionRows[opt]
 			if rowRefs then
 				local isOn = selected[opt] == true
@@ -1267,7 +1216,6 @@ function Library:CreateWindow(opts)
 		function api:SetOptions(newOptions, silent)
 			if listFrame then closeList() end
 			currentOptions = newOptions or {}
-			-- remove seleções que não existem mais
 			for v in pairs(selected) do
 				if not table.find(currentOptions, v) then selected[v] = nil end
 			end
@@ -1278,26 +1226,19 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ---------- KEYBIND ----------
-	-- Registro ÚNICO de atalhos: os elementos AddKeybind e os atalhos criados por código
-	-- (Window:RegisterKeybind) vivem na mesma tabela, então aparecem juntos na lista Ctrl+B
-	-- e compartilham a checagem de conflito.
-	-- id -> {key, onPressed, onChanged, enabled, name, flag, refresh, custom}
 	local keybinds = {}
 	local keybindCounter = 0
 	local isAnyKeybindListening = false
 	local keybindCooldownUntil = 0
-	local refreshKeybindViewer -- definido junto do visualizador (mais abaixo)
-	local toggleKeybindViewer  -- idem; só existe se KeybindViewer ~= false
+	local refreshKeybindViewer
+	local toggleKeybindViewer
 
-	-- Aceita KeyCode ou nome ("F", "RightShift"); devolve nil se for inválido.
 	local function toKeyCode(key)
 		if typeof(key) == "EnumItem" then return key end
 		if type(key) == "string" then return keyCodeFromName(key, nil) end
 		return nil
 	end
 
-	-- Procura por id/flag (elementos) ou pelo nome usado em RegisterKeybind.
 	local function findKeybind(nameOrId)
 		if keybinds[nameOrId] then return keybinds[nameOrId], nameOrId end
 		local customId = "Custom." .. tostring(nameOrId)
@@ -1309,8 +1250,6 @@ function Library:CreateWindow(opts)
 		return keyCode == Enum.KeyCode.Unknown and "None" or keyCode.Name
 	end
 
-	-- Troca a tecla de um atalho: atualiza o botão, a flag (salva no arquivo), a lista Ctrl+B
-	-- e dispara OnChanged (a não ser que silent).
 	local function applyKeybindKey(id, keyCode, silent)
 		local kb = keybinds[id]
 		if not kb or typeof(keyCode) ~= "EnumItem" then return false end
@@ -1322,11 +1261,9 @@ function Library:CreateWindow(opts)
 		return true
 	end
 
-	-- Um único handler global despacha todos os atalhos (e o Esc fecha dropdowns).
 	track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 
-		-- Ctrl+B abre/fecha a lista de atalhos
 		if input.KeyCode == Enum.KeyCode.B and not gameProcessed
 			and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
 			if toggleKeybindViewer then
@@ -1341,7 +1278,6 @@ function Library:CreateWindow(opts)
 			return
 		end
 		if isAnyKeybindListening or os.clock() < keybindCooldownUntil then return end
-		-- não dispara atalhos enquanto o usuário digita num TextBox
 		if UserInputService:GetFocusedTextBox() then return end
 
 		for _, kb in pairs(keybinds) do
@@ -1361,12 +1297,11 @@ function Library:CreateWindow(opts)
 		addRowHeader(row, rowTitle, description, 0.55)
 		registerRow(entry, row, rowTitle .. " " .. description)
 
-		-- tecla inicial: salva no arquivo > Default > None
 		local startKey = keyCodeFromName(o.Flag and savedFlags[o.Flag], toKeyCode(o.Default) or Enum.KeyCode.Unknown)
 		local kb = {
 			key = startKey,
-			onPressed = o.Callback,   -- roda quando a TECLA É APERTADA
-			onChanged = o.OnChanged,  -- roda quando o usuário TROCA a tecla
+			onPressed = o.Callback,
+			onChanged = o.OnChanged,
 			enabled = true,
 			name = rowTitle,
 			flag = o.Flag,
@@ -1391,7 +1326,6 @@ function Library:CreateWindow(opts)
 		local listenConnection
 		local listenToken
 
-		-- chamado por applyKeybindKey (inclusive via SetKeybindKey / api:Set)
 		kb.refresh = function()
 			if not isListening then
 				keyBtn.Text = keyDisplayName(kb.key)
@@ -1401,7 +1335,7 @@ function Library:CreateWindow(opts)
 		local function stopListening(newKeyCode)
 			isListening = false
 			isAnyKeybindListening = false
-			keybindCooldownUntil = os.clock() + 0.25 -- evita disparar a ação com a própria tecla recém-atribuída
+			keybindCooldownUntil = os.clock() + 0.25
 			untrack(listenConnection)
 			listenConnection = nil
 			if newKeyCode then
@@ -1427,7 +1361,6 @@ function Library:CreateWindow(opts)
 				end
 				if gameProcessed then return end
 
-				-- conflito com qualquer outro atalho (da UI ou registrado por código)
 				for otherId, other in pairs(keybinds) do
 					if otherId ~= id and other.key == input.KeyCode then
 						showNotification("Atalho em uso",
@@ -1439,7 +1372,6 @@ function Library:CreateWindow(opts)
 				stopListening(input.KeyCode)
 			end))
 
-			-- Cancela sozinho se o usuário desistir.
 			task.delay(8, function()
 				if listenToken == token and isListening then
 					stopListening(nil)
@@ -1455,7 +1387,6 @@ function Library:CreateWindow(opts)
 
 		local api = {Row = row}
 		function api:Get() return kb.key end
-		-- Set aceita KeyCode ou nome ("F"). silent = true não dispara OnChanged.
 		function api:Set(key, silent) return applyKeybindKey(id, toKeyCode(key), silent) end
 		function api:SetEnabled(enabled)
 			kb.enabled = enabled and true or false
@@ -1465,12 +1396,11 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ---------- TOGGLE ----------
 	local function setToggleVisual(toggleBg, knob, isOn)
 		local info = TweenInfo.new(0.15)
 		TweenService:Create(knob, info, {
 			Position = isOn and UDim2.new(1, -23, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
-			BackgroundColor3 = isOn and COLORS.AccentDark or COLORS.Knob, -- track branco => knob escuro
+			BackgroundColor3 = isOn and COLORS.AccentDark or COLORS.Knob,
 		}):Play()
 		TweenService:Create(toggleBg, info, {BackgroundColor3 = isOn and COLORS.ToggleOn or COLORS.ToggleOff}):Play()
 	end
@@ -1513,7 +1443,6 @@ function Library:CreateWindow(opts)
 		clickCatcher.Text = ""
 		clickCatcher.Parent = toggleBg
 
-		-- silent = não mostra notificação (e não chama o Callback).
 		local function setState(value, silent)
 			value = value and true or false
 			if value == isOn then return true end
@@ -1543,7 +1472,6 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ---------- TEXTBOX ----------
 	local function addTextbox(body, entry, o)
 		local rowTitle, description = o.Title or "Input", o.Description or ""
 		local flag = o.Flag
@@ -1617,7 +1545,6 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ---------- BOTÃO ----------
 	local function addButton(body, entry, o)
 		local rowTitle, description = o.Title or "Button", o.Description or ""
 
@@ -1646,7 +1573,6 @@ function Library:CreateWindow(opts)
 		return {Row = row}
 	end
 
-	-- ---------- LABEL / SEPARATOR ----------
 	local function addLabel(body, entry, o)
 		local height = o.Height or 24
 		local row = newFrame({Name = "LabelRow", Size = UDim2.new(1, 0, 0, height), BackgroundTransparency = 1}, body)
@@ -1675,7 +1601,6 @@ function Library:CreateWindow(opts)
 		return {Row = line}
 	end
 
-	-- API pública de um card (métodos com ":").
 	local function makeCardApi(body, entry)
 		entry.body = body
 		local api = {}
@@ -1703,7 +1628,6 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
-	-- ================== ROOT ==================
 	screenGui = Instance.new("ScreenGui")
 	screenGui.Name = guiName
 	screenGui.ResetOnSpawn = false
@@ -1723,8 +1647,6 @@ function Library:CreateWindow(opts)
 	uiScale = Instance.new("UIScale")
 	uiScale.Parent = mainFrame
 
-	-- Overlay dos dropdowns: filho do mainFrame (herda UIScale e some junto com a janela).
-	-- O "catcher" é gigante e transparente: clicar em qualquer lugar fecha o dropdown aberto.
 	overlay = Instance.new("Frame")
 	overlay.Name = "DropdownOverlay"
 	overlay.BackgroundTransparency = 1
@@ -1744,8 +1666,6 @@ function Library:CreateWindow(opts)
 	overlayCatcher.Parent = overlay
 	overlayCatcher.MouseButton1Click:Connect(closeAnyOpenDropdown)
 
-	-- Escala automática: a janela nunca passa do tamanho da tela (útil no mobile),
-	-- e o slider "UI Scale" (página Settings) ajusta dentro desse limite.
 	local hasMovedWindow = false
 
 	local function clampCenter(cx, cy)
@@ -1776,7 +1696,6 @@ function Library:CreateWindow(opts)
 		applyScale()
 	end))
 
-	-- ================== NOTIFICAÇÕES (TOAST) ==================
 	local notificationContainer = newFrame({
 		Name = "NotificationContainer",
 		Size = UDim2.new(0, 260, 1, -20),
@@ -1796,10 +1715,7 @@ function Library:CreateWindow(opts)
 	local activeToasts = {}
 
 	showNotification = function(toastTitle, message, kind)
-		-- o mascote (se existir) reage mesmo com as notificações desligadas
 		if Window.OnNotify then Window.OnNotify(kind) end
-
-		-- Com notificações desligadas, só erros aparecem.
 		if not notificationsEnabled() and kind ~= "error" then return end
 
 		local accentColor = COLORS.Accent
@@ -1896,15 +1812,12 @@ function Library:CreateWindow(opts)
 		end
 
 		activeToasts[#activeToasts + 1] = dismiss
-		-- Limita a pilha: toasts antigos somem quando passa do máximo.
 		if #activeToasts > MAX_TOASTS then
 			activeToasts[1]()
 		end
 		task.delay(3, dismiss)
 	end
 
-	-- ================== MOSTRAR / ESCONDER JANELA ==================
-	-- Botão flutuante pra reabrir a janela (essencial no mobile, sem tecla de atalho).
 	local restoreBtn = newButton({
 		Name = "RestoreBtn",
 		Size = UDim2.new(0, 40, 0, 40),
@@ -1937,7 +1850,6 @@ function Library:CreateWindow(opts)
 		setUiVisible(true)
 	end)
 
-	-- Atalho embutido de mostrar/esconder a janela (a página Settings permite rebindar).
 	local toggleDefault = opts.ToggleKey or Enum.KeyCode.Insert
 	do
 		local toggleKey = keyCodeFromName(savedFlags["Window.Toggle"], toggleDefault)
@@ -1951,7 +1863,6 @@ function Library:CreateWindow(opts)
 		initFlag("Window.Toggle", toggleKey.Name)
 	end
 
-	-- ================== UNLOAD ==================
 	local function unload()
 		if unloaded then return end
 		unloaded = true
@@ -1968,7 +1879,6 @@ function Library:CreateWindow(opts)
 		end
 	end
 
-	-- Fade out -> troca no meio -> fade in. Trava durante a animação.
 	local isSwitching = false
 	local function fadeSwitch(canvasGroup, onMidpoint)
 		if isSwitching then return end
@@ -1992,7 +1902,7 @@ function Library:CreateWindow(opts)
 	-- ================== SIDEBAR COMPACTA (180PX) ==================
 	sidebar = newFrame({
 		Name = "Sidebar",
-		Size = UDim2.new(0, 180, 1, 0), -- REDUZIDO DE 210 PARA 180
+		Size = UDim2.new(0, 180, 1, 0),
 		BackgroundColor3 = COLORS.Sidebar,
 	}, mainFrame)
 	corner(sidebar, 12)
@@ -2003,7 +1913,6 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = COLORS.Sidebar,
 	}, sidebar)
 
-	-- Linha vertical separando a sidebar do conteúdo (igual ao hub).
 	newFrame({
 		Name = "SidebarEdge",
 		Size = UDim2.new(0, 1, 1, 0),
@@ -2013,8 +1922,8 @@ function Library:CreateWindow(opts)
 
 	local logoHolder = newFrame({
 		Name = "LogoHolder",
-		Size = UDim2.new(1, -24, 0, 50), -- AJUSTADO: De -32 para -24
-		Position = UDim2.new(0, 12, 0, 14), -- AJUSTADO: De 16 para 12
+		Size = UDim2.new(1, -24, 0, 50),
+		Position = UDim2.new(0, 12, 0, 14),
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -2060,15 +1969,15 @@ function Library:CreateWindow(opts)
 
 	newFrame({
 		Name = "SidebarDivider",
-		Size = UDim2.new(1, -24, 0, 1), -- AJUSTADO: De -32 para -24
-		Position = UDim2.new(0, 12, 0, 76), -- AJUSTADO: De 16 para 12
+		Size = UDim2.new(1, -24, 0, 1),
+		Position = UDim2.new(0, 12, 0, 76),
 		BackgroundColor3 = COLORS.Divider,
 	}, sidebar)
 
 	navList = newFrame({
 		Name = "NavList",
-		Size = UDim2.new(1, -16, 1, -104), -- AJUSTADO: De -22 para -16
-		Position = UDim2.new(0, 8, 0, 90), -- AJUSTADO: De 11 para 8
+		Size = UDim2.new(1, -16, 1, -104),
+		Position = UDim2.new(0, 8, 0, 90),
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -2077,15 +1986,13 @@ function Library:CreateWindow(opts)
 	navLayout.Padding = UDim.new(0, 4)
 	navLayout.Parent = navList
 
-	-- ================== CONTAINER DIREITO (AJUSTADO PARA 180PX) ==================
 	local rightContainer = newFrame({
 		Name = "RightContainer",
-		Size = UDim2.new(1, -180, 1, 0), -- AJUSTADO: De -210 para -180
-		Position = UDim2.new(0, 180, 0, 0), -- AJUSTADO: De 210 para 180
+		Size = UDim2.new(1, -180, 1, 0),
+		Position = UDim2.new(0, 180, 0, 0),
 		BackgroundTransparency = 1,
 	}, mainFrame)
 
-	-- ================== TOP BAR ==================
 	local topBar = newFrame({
 		Name = "TopBar",
 		Size = UDim2.new(1, -28, 0, 40),
@@ -2093,7 +2000,6 @@ function Library:CreateWindow(opts)
 		BackgroundTransparency = 1,
 	}, rightContainer)
 
-	-- Linha separando a barra superior (título, busca, minimizar/fechar) do resto.
 	newFrame({
 		Name = "TopBarDivider",
 		Size = UDim2.new(1, 0, 0, 1),
@@ -2104,7 +2010,6 @@ function Library:CreateWindow(opts)
 	local pageTitleLabel, pageCounterLabel, searchInput
 
 	do
-		-- Arrastar a janela pela TopBar (com limite: não deixa sair da tela).
 		local isDraggingWindow = false
 		local dragStartInputPos, dragStartCenter
 
@@ -2133,7 +2038,6 @@ function Library:CreateWindow(opts)
 			end
 		end))
 
-		-- Título + contador lado a lado (o contador acompanha a largura do título).
 		local titleHolder = newFrame({
 			Name = "TitleHolder",
 			Size = UDim2.new(0, 0, 1, 0),
@@ -2245,7 +2149,6 @@ function Library:CreateWindow(opts)
 			ImageColor3 = COLORS.TextPrimary,
 		}, closeBtn)
 
-		-- Hover: os botões têm fundo transparente, então o hover anima a transparência.
 		local function addGhostHover(btn, hoverColor)
 			btn.MouseEnter:Connect(function()
 				btn.BackgroundColor3 = hoverColor
@@ -2266,7 +2169,6 @@ function Library:CreateWindow(opts)
 		closeBtn.MouseButton1Click:Connect(unload)
 	end
 
-	-- ================== TAB BAR ==================
 	local tabBar = newFrame({
 		Name = "TabBar",
 		Size = UDim2.new(1, -28, 0, 32),
@@ -2281,7 +2183,6 @@ function Library:CreateWindow(opts)
 		BackgroundColor3 = COLORS.Divider,
 	}, rightContainer)
 
-	-- ================== CONTENT ==================
 	contentCanvas = Instance.new("CanvasGroup")
 	contentCanvas.Name = "ContentCanvas"
 	contentCanvas.BackgroundTransparency = 1
@@ -2290,8 +2191,6 @@ function Library:CreateWindow(opts)
 	contentCanvas.GroupTransparency = 0
 	contentCanvas.Parent = rightContainer
 
-	-- ScrollingFrame com canvas automático; fecha o dropdown aberto ao rolar
-	-- (a lista fica num overlay e não acompanha o scroll).
 	local function createScroll(name)
 		local scroll = Instance.new("ScrollingFrame")
 		scroll.Name = name
@@ -2315,7 +2214,6 @@ function Library:CreateWindow(opts)
 		return scroll
 	end
 
-	-- Placeholder: aparece quando a aba/página atual não tem nenhum card.
 	local placeholderPage = newFrame({
 		Name = "PlaceholderPage",
 		Size = UDim2.new(1, 0, 1, 0),
@@ -2354,12 +2252,9 @@ function Library:CreateWindow(opts)
 	}, contentCanvas)
 	noResultsLabel.Visible = false
 
-	-- ================== PÁGINAS / ABAS / CARDS ==================
 	local pages = Window.Pages
 	local currentPage
 
-	-- Busca: filtra linhas por título/descrição; cards sem nenhum resultado somem
-	-- (se o título do card casar, o card inteiro continua visível). Só vale pra aba atual.
 	applySearch = function()
 		local query = string.lower(trim(searchInput.Text))
 		local tab = currentPage and currentPage.CurrentTab
@@ -2427,16 +2322,14 @@ function Library:CreateWindow(opts)
 	local function styleTabs(page)
 		for _, tab in ipairs(page.Tabs) do
 			local isActive = (tab == page.CurrentTab)
-			-- Nome
 			if tab.NameLabel then
 				tab.NameLabel.TextColor3 = isActive and COLORS.TextPrimary or COLORS.TextMuted
 				tab.NameLabel.FontFace = isActive and FONTS.Title or FONTS.Body
 			end
-			-- Ícone (muda pra cor de destaque quando ativo)
 			if tab.IconElement then
 				setIconColor(tab.IconElement, isActive and COLORS.Accent or COLORS.TextMuted)
 			end
-			tab.Underline.Visible = isActive
+			-- REMOVIDO: tab.Underline.Visible = isActive
 		end
 	end
 
@@ -2584,7 +2477,6 @@ function Library:CreateWindow(opts)
 		}
 		pages[#pages + 1] = page
 
-		-- Item da sidebar
 		local navBtn = newButton({
 			Name = page.Name .. "Nav",
 			Size = UDim2.new(1, 0, 0, 46),
@@ -2608,8 +2500,8 @@ function Library:CreateWindow(opts)
 		}, navBtn)
 
 		local navLabel = newLabel({
-			Size = UDim2.new(1, -44, 1, 0), -- AJUSTADO: De -52 para -44
-			Position = UDim2.new(0, 38, 0, 0), -- AJUSTADO: De 46 para 38
+			Size = UDim2.new(1, -44, 1, 0),
+			Position = UDim2.new(0, 38, 0, 0),
 			Text = page.Name,
 			Font = Enum.Font.GothamBold,
 			TextColor3 = COLORS.TextMuted,
@@ -2618,7 +2510,6 @@ function Library:CreateWindow(opts)
 
 		page.Nav = {Button = navBtn, Label = navLabel, Icon = navIcon, Stroke = navStroke}
 
-		-- Hover só em itens inativos (o ativo mantém o fundo de destaque).
 		navBtn.MouseEnter:Connect(function()
 			if currentPage ~= page then
 				TweenService:Create(navBtn, TweenInfo.new(0.1), {BackgroundColor3 = COLORS.FieldHover}):Play()
@@ -2637,7 +2528,6 @@ function Library:CreateWindow(opts)
 			end)
 		end)
 
-		-- Barra de abas desta página
 		page.TabBarFrame = newFrame({
 			Name = page.Name .. "TabBar",
 			Size = UDim2.new(1, 0, 1, 0),
@@ -2650,11 +2540,10 @@ function Library:CreateWindow(opts)
 		tabLayout.Padding = UDim.new(0, 20)
 		tabLayout.Parent = page.TabBarFrame
 
-		-- Abas aceitam ícone (GitHub/Roblox) ou emoji.
 		function page:AddTab(to)
 			to = to or {}
 			local tabName = tostring(to.Name or ("Tab " .. (#page.Tabs + 1)))
-			local tabIcon = to.Icon          -- aceita "gh:...", "rbxassetid://...", número, ou nil
+			local tabIcon = to.Icon
 			local tabIconFallback = to.IconFallback or to.Emoji or ""
 			local tab = newTab(page, tabName, to.Columns or page.Columns)
 			page.Tabs[#page.Tabs + 1] = tab
@@ -2672,10 +2561,9 @@ function Library:CreateWindow(opts)
 			btn.BackgroundTransparency = 1
 			btn.Size = UDim2.new(0, 0, 1, -4)
 			btn.AutomaticSize = Enum.AutomaticSize.X
-			btn.Text = "" -- texto vai pro label interno
+			btn.Text = ""
 			btn.Parent = holder
 
-			-- Layout horizontal: ícone + nome
 			local btnLayout = Instance.new("UIListLayout")
 			btnLayout.FillDirection = Enum.FillDirection.Horizontal
 			btnLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -2683,7 +2571,6 @@ function Library:CreateWindow(opts)
 			btnLayout.Padding = UDim.new(0, 6)
 			btnLayout.Parent = btn
 
-			-- Ícone (opcional)
 			local iconElement = nil
 			if tabIcon then
 				iconElement = createIcon({
@@ -2696,7 +2583,6 @@ function Library:CreateWindow(opts)
 				}, btn)
 				iconElement.LayoutOrder = 1
 			elseif tabIconFallback ~= "" then
-				-- Sem Icon, mas com Emoji: usa como texto simples (compatibilidade)
 				local emojiLabel = newLabel({
 					Name = "TabEmoji",
 					Size = UDim2.new(0, 0, 1, 0),
@@ -2718,16 +2604,11 @@ function Library:CreateWindow(opts)
 			nameLabel.AutomaticSize = Enum.AutomaticSize.X
 			nameLabel.LayoutOrder = 2
 
-			local underline = newFrame({
-				Name = "Underline",
-				Size = UDim2.new(1, 0, 0, 2),
-				Position = UDim2.new(0, 0, 1, -2),
-				BackgroundColor3 = COLORS.Accent,
-				Visible = false,
-			}, holder)
+			-- REMOVIDO: Criação do Frame "Underline"
 
-			tab.Button, tab.Underline = btn, underline
-			tab.NameLabel, tab.IconElement = nameLabel, iconElement  -- referências pro styleTabs
+			tab.Button = btn -- REMOVIDO: tab.Underline da atribuição
+
+			tab.NameLabel, tab.IconElement = nameLabel, iconElement
 
 			btn.MouseEnter:Connect(function()
 				if page.CurrentTab ~= tab then
@@ -2755,7 +2636,6 @@ function Library:CreateWindow(opts)
 			return tab
 		end
 
-		-- Sem abas explícitas, os cards vão pra uma aba padrão (a barra de abas fica oculta).
 		function page:AddCard(co)
 			local tab = page.Tabs[1] or page:AddTab({Name = "Main"})
 			return tab:AddCard(co)
@@ -2771,17 +2651,16 @@ function Library:CreateWindow(opts)
 		return page
 	end
 
-	-- ================== PÁGINA SETTINGS PRONTA ==================
 	function Window:AddSettingsPage(so)
 		so = so or {}
 		local page = Window:AddPage({
 			Name = so.Name or "Settings",
 			Icon = so.Icon,
-			IconFallback = "️",
+			IconFallback = "⚙️",
 			Columns = 1,
 		})
 
-		local ui = page:AddCard({Title = "INTERFACE", IconFallback = "️"})
+		local ui = page:AddCard({Title = "INTERFACE", IconFallback = "🖥️"})
 		ui:AddToggle({
 			Title = "Notificações",
 			Description = "Mostra avisos no canto da tela (erros sempre aparecem).",
@@ -2822,7 +2701,6 @@ function Library:CreateWindow(opts)
 		return page
 	end
 
-	-- ================== MÉTODOS DA JANELA ==================
 	Window.Unload = unload
 
 	function Window:Notify(toastTitle, message, kind)
@@ -2857,7 +2735,6 @@ function Library:CreateWindow(opts)
 		end)
 	end
 
-	-- ================== ATALHOS: API + LISTA (Ctrl+B) ==================
 	local kbViewer = newFrame({
 		Name = "KeybindViewer",
 		Size = UDim2.new(0, 340, 0, 400),
@@ -3002,7 +2879,6 @@ function Library:CreateWindow(opts)
 		setKeybindViewerVisible(false)
 	end)
 
-	-- Ctrl+B só funciona se KeybindViewer ~= false (o dispatcher checa se isto existe).
 	if opts.KeybindViewer ~= false then
 		toggleKeybindViewer = function()
 			setKeybindViewerVisible(not kbViewer.Visible)
@@ -3013,8 +2889,6 @@ function Library:CreateWindow(opts)
 	function Window:HideKeybindViewer() setKeybindViewerVisible(false) end
 	function Window:ToggleKeybindViewer() setKeybindViewerVisible(not kbViewer.Visible) end
 
-	-- Registra um atalho global por código (sem linha na UI). Aparece na lista Ctrl+B.
-	-- flag (opcional): salva/restaura a tecla no arquivo de config.
 	function Window:RegisterKeybind(name, key, callback, flag)
 		local keyCode = toKeyCode(key)
 		if not keyCode then
@@ -3035,13 +2909,11 @@ function Library:CreateWindow(opts)
 		return true
 	end
 
-	-- Só remove atalhos criados com RegisterKeybind.
 	function Window:UnregisterKeybind(name)
 		keybinds["Custom." .. tostring(name)] = nil
 		if refreshKeybindViewer then refreshKeybindViewer() end
 	end
 
-	-- name = nome do RegisterKeybind, ou a Flag de um AddKeybind.
 	function Window:SetKeybindEnabled(name, enabled)
 		local kb = findKeybind(name)
 		if not kb then return false end
@@ -3056,12 +2928,10 @@ function Library:CreateWindow(opts)
 		return applyKeybindKey(id, toKeyCode(key), silent)
 	end
 
-	-- Troca a tecla de mostrar/esconder a janela (atualiza o botão na página Settings também).
 	function Window:SetToggleKeybind(key, silent)
 		return applyKeybindKey("Window.Toggle", toKeyCode(key), silent)
 	end
 
-	-- id -> {Name, Key, Enabled, Custom}
 	function Window:GetKeybinds()
 		local result = {}
 		for id, kb in pairs(keybinds) do
@@ -3075,21 +2945,15 @@ function Library:CreateWindow(opts)
 		return result
 	end
 
-	-- ================== MASCOTE ==================
-	-- Personagem que reage ao mouse, aos cliques e às notificações.
-	-- Espera PNGs com estes nomes dentro de `Folder` (ex.: hub/frames):
-	-- angry blink blushAway boop denial dizzy excited flustered grumpy huff laugh
-	-- lookDown lookL lookR lookUp mouth1 mouth2 mouth3 nervous ow pat poke pout
-	-- shyGlance sleep smug squint wink yawn
 	function Window:AddMascot(mo)
 		mo = mo or {}
-		local gh = mo.Github -- opcional: {User=, Repo=, Branch=}
+		local gh = mo.Github
 		local folder = mo.Folder or "hub/frames"
 		local size = mo.Size or Vector2.new(150, 150)
 		local idleName = mo.Idle or "mouth1"
 		local sleepAfter = mo.SleepAfter or 12
 		local deadzone = mo.Deadzone or 70
-		local fastSpeed = mo.FastSpeed or 3500 -- px/s
+		local fastSpeed = mo.FastSpeed or 3500
 
 		local NAMES = {
 			"angry", "blink", "blushAway", "boop", "denial", "dizzy", "excited", "flustered",
@@ -3100,10 +2964,9 @@ function Library:CreateWindow(opts)
 		local MOUTHS = {"mouth1", "mouth2", "mouth3"}
 		local function pick(t) return t[math.random(#t)] end
 
-		-- ---------- Imagem ----------
-		local placement = mo.Placement or "Top" -- "Top" (apoiada na borda de cima) | "Sidebar"
-		local overlap = mo.Overlap or 24        -- Top: quantos px do corpo descem sobre a borda da janela
-		local behind = mo.Behind ~= false       -- Top: corpo atrás dos elementos da janela (só as mãos ficam na frente)
+		local placement = mo.Placement or "Top"
+		local overlap = mo.Overlap or 24
+		local behind = mo.Behind ~= false
 		local parent = mo.Parent or (placement == "Sidebar" and sidebar or mainFrame)
 		local button = Instance.new("ImageButton")
 		button.Name = "Mascot"
@@ -3113,7 +2976,6 @@ function Library:CreateWindow(opts)
 		button.ScaleType = Enum.ScaleType.Fit
 		button.AnchorPoint = Vector2.new(0.5, 1)
 		if placement == "Top" then
-			-- bottom do sprite um pouco abaixo da borda de cima da janela, como se espiasse por cima dela
 			button.Position = mo.Position or UDim2.new(mo.X or 0.62, 0, 0, overlap + (mo.OffsetY or 0))
 			button.ZIndex = behind and 0 or 2
 			topExtra = math.max(size.Y - overlap, 0)
@@ -3121,14 +2983,11 @@ function Library:CreateWindow(opts)
 		else
 			button.Position = mo.Position or UDim2.new(0.5, 0, 1, -10)
 			if parent == sidebar then
-				-- a lista de páginas não passa por baixo dela
-				navList.Size = UDim2.new(1, -16, 1, -104 - size.Y) -- AJUSTADO: De -22 para -16
+				navList.Size = UDim2.new(1, -16, 1, -104 - size.Y)
 			end
 		end
 		button.Parent = parent
 
-		-- Mãos apoiadas na borda (camada por cima do corpo). Assume PNGs do mesmo tamanho/posição do corpo.
-		-- Só liga com Hands = true. Troque os nomes com HandFiles = {Left = "handL-hands", Right = "handR-hands"}.
 		local handLayers = {}
 		if placement == "Top" and mo.Hands == true then
 			local handFiles = mo.HandFiles or {Left = "handL-hands", Right = "handR-hands"}
@@ -3136,7 +2995,6 @@ function Library:CreateWindow(opts)
 				local hand = Instance.new("ImageLabel")
 				hand.Name = "Hand" .. side
 				hand.BackgroundTransparency = 1
-				-- irmã do corpo (não filha) pra poder ficar NA FRENTE da janela enquanto o corpo fica atrás
 				hand.Size = button.Size
 				hand.Position = button.Position
 				hand.AnchorPoint = button.AnchorPoint
@@ -3159,18 +3017,16 @@ function Library:CreateWindow(opts)
 			if asset and button.Image ~= asset then button.Image = asset end
 		end
 
-		-- baixa todos os frames em paralelo (com cache em disco)
 		for _, name in ipairs(NAMES) do
 			task.spawn(function()
 				local asset = resolveGithubAsset(folder .. "/" .. name .. ".png", gh)
 				if asset then
 					frames[name] = asset
-					if not unloaded then show(shown) end -- reaplica caso o frame atual tenha acabado de chegar
+					if not unloaded then show(shown) end
 				end
 			end)
 		end
 
-		-- diagnóstico: avisa no console se os frames não chegaram (repo/branch/pasta errados, HTTP bloqueado...)
 		task.delay(10, function()
 			if unloaded then return end
 			local loaded, missing = 0, {}
@@ -3188,7 +3044,6 @@ function Library:CreateWindow(opts)
 			end
 		end)
 
-		-- ---------- Estado ----------
 		local reactName, reactUntil = nil, 0
 		local blinkUntil, nextBlink = 0, os.clock() + 3
 		local talkUntil = 0
@@ -3203,7 +3058,6 @@ function Library:CreateWindow(opts)
 			reactName, reactUntil = name, os.clock() + (duration or 1.2)
 		end
 
-		-- ---------- Interação direta ----------
 		button.MouseEnter:Connect(function() hovering = true end)
 		button.MouseLeave:Connect(function() hovering, holding = false, false end)
 
@@ -3227,7 +3081,6 @@ function Library:CreateWindow(opts)
 			else react(clicks % 2 == 1 and "poke" or "boop", 0.7) end
 		end)
 
-		-- ---------- Loop principal ----------
 		task.spawn(function()
 			while not unloaded do
 				task.wait(0.05)
@@ -3235,7 +3088,6 @@ function Library:CreateWindow(opts)
 				if not mainFrame.Visible then continue end
 				local now = os.clock()
 
-				-- movimento do mouse
 				local mouse = UserInputService:GetMouseLocation()
 				local dist = (mouse - lastMouse).Magnitude
 				local speed = dist / math.max(now - lastTick, 0.001)
@@ -3243,7 +3095,6 @@ function Library:CreateWindow(opts)
 				if dist > 2 then lastMove = now end
 				if speed > fastSpeed and not reactName then react("nervous", 0.7) end
 
-				-- direção do olhar (GetMouseLocation inclui o inset do topo da tela)
 				local center = button.AbsolutePosition + button.AbsoluteSize / 2
 				local inset = GuiService:GetGuiInset()
 				local d = (mouse - inset) - center
@@ -3251,18 +3102,15 @@ function Library:CreateWindow(opts)
 				elseif math.abs(d.X) > math.abs(d.Y) then lookName = d.X < 0 and "lookL" or "lookR"
 				else lookName = d.Y < 0 and "lookUp" or "lookDown" end
 
-				-- piscar
 				if now >= nextBlink then
 					blinkUntil = now + 0.14
 					nextBlink = now + 2.5 + math.random() * 3.5
 				end
 
-				-- fim de reação (depois de brava, ela bufa)
 				if reactName and now >= reactUntil then
 					if reactName == "angry" then react("huff", 1.5) else reactName = nil end
 				end
 
-				-- escolhe o frame (prioridade de cima pra baixo)
 				local idle = now - lastMove
 				local name
 				if holding and now - holdStart > 0.35 then name = "pat"
@@ -3279,14 +3127,12 @@ function Library:CreateWindow(opts)
 			end
 		end)
 
-		-- ---------- Reage à UI ----------
 		Window.OnNotify = function(kind)
 			if kind == "success" then react(pick({"excited", "laugh", "wink"}), 1.6)
 			elseif kind == "error" then react(pick({"ow", "denial", "nervous"}), 1.8)
 			else talkUntil = os.clock() + 1.4 end
 		end
 
-		-- toggles ligando/desligando: pisca/emburra
 		track(Window.Changed:Connect(function(_, value)
 			if value == true then react("wink", 0.9)
 			elseif value == false then react("pout", 0.9) end
@@ -3300,7 +3146,6 @@ function Library:CreateWindow(opts)
 		}
 	end
 
-	-- ================== INICIALIZAÇÃO ==================
 	applyScale()
 	updateActivePage()
 	env.__NervLibWindows[windowId] = Window
