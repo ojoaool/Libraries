@@ -1,5 +1,5 @@
 --[[
-	NERV UI Library v1.2
+	NERV UI Library v1.3
 	Biblioteca de UI pra executor (Roblox). Hospede este arquivo no GitHub e use:
 
 		local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/USUARIO/REPO/main/NervLib.lua"))()
@@ -58,9 +58,15 @@
 		Github   = {User = "...", Repo = "...", Branch = "main"},  -- opcional (padrão: Library.Github)
 		Idle     = "mouth1",                           -- frame neutro
 		Size     = Vector2.new(150, 150),
-		Position = UDim2, Parent = Instance,           -- opcionais (padrão: rodapé da sidebar)
+		Placement = "Top" | "Sidebar",                 -- Top (padrão): apoiada na borda de cima da janela
+		X = 0.62, Overlap = 24, OffsetY = 0,           -- Top: posição horizontal (0-1), quanto desce sobre a borda, ajuste fino
+		Behind = true,                                 -- Top: corpo atrás da janela, só as mãos na frente
+		Hands = true, HandFiles = {Left="handL", Right="handR"},  -- camadas de mãos (mesmo tamanho do corpo)
+		Position = UDim2, Parent = Instance,           -- opcionais
 		SleepAfter, Deadzone, FastSpeed,               -- opcionais
-	}) -> {Image, React(name, secs), Talk(secs)}
+	}) -> {Image, Hands, React(name, secs), Talk(secs)}
+
+	CreateWindow({Scale = 0.95})  -- escala fixa da janela (padrão 0.95; nunca passa do tamanho da tela)
 ]]
 
 local Players = game:GetService("Players")
@@ -102,7 +108,7 @@ local COLORS = {
 }
 
 local Library = {
-	Version = "1.2.0",
+	Version = "1.3.0",
 	Colors = COLORS,
 	CacheDir = "NervLib",
 
@@ -480,6 +486,8 @@ function Library:CreateWindow(opts)
 	local WINDOW_H = (opts.Size and opts.Size.Y) or 640
 	local FADE_SPEED = 0.18
 	local MAX_TOASTS = 4
+	local FIXED_SCALE = opts.Scale or 0.95 -- escala fixa da janela (limitada ao tamanho da tela)
+	local topExtra = 0 -- pixels que o mascote ocupa acima da janela (usado pra não cortar no topo da tela)
 
 	-- Instância única por Id: criar de novo descarrega a janela anterior.
 	env.__NervLibWindows = env.__NervLibWindows or {}
@@ -1744,7 +1752,8 @@ function Library:CreateWindow(opts)
 		local screen = screenGui.AbsoluteSize
 		local half = mainFrame.AbsoluteSize / 2
 		cx = math.clamp(cx, math.min(half.X, screen.X / 2), math.max(screen.X - half.X, screen.X / 2))
-		cy = math.clamp(cy, math.min(half.Y, screen.Y / 2), math.max(screen.Y - half.Y, screen.Y / 2))
+		local extra = topExtra * uiScale.Scale
+		cy = math.clamp(cy, math.min(half.Y + extra, screen.Y / 2), math.max(screen.Y - half.Y, screen.Y / 2))
 		return cx, cy
 	end
 
@@ -1758,10 +1767,8 @@ function Library:CreateWindow(opts)
 	applyScale = function()
 		local screen = screenGui.AbsoluteSize
 		if screen.X <= 0 or screen.Y <= 0 then return end
-		local percent = Window.Flags["Settings.UIScale"] or savedFlags["Settings.UIScale"] or 100
-		if type(percent) ~= "number" then percent = 100 end
-		local fitMax = math.min((screen.X - 20) / WINDOW_W, (screen.Y - 20) / WINDOW_H)
-		uiScale.Scale = math.clamp(math.min(fitMax, percent / 100), 0.4, 1.5)
+		local fitMax = math.min((screen.X - 20) / WINDOW_W, (screen.Y - 20 - topExtra) / WINDOW_H)
+		uiScale.Scale = math.clamp(math.min(fitMax, FIXED_SCALE), 0.4, 1.5)
 		clampWindow()
 	end
 	track(screenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
@@ -2782,17 +2789,6 @@ function Library:CreateWindow(opts)
 			Default = true,
 			Notify = true,
 		})
-		-- A escala só é aplicada ao soltar o slider (committed); aplicar durante o arraste
-		-- moveria a barrinha debaixo do mouse e causaria tremedeira.
-		ui:AddSlider({
-			Title = "UI Scale",
-			Description = "Tamanho da janela (limitado ao tamanho da tela).",
-			Min = 60, Max = 120, Default = 100, Step = 5, Suffix = "%",
-			Flag = "Settings.UIScale",
-			Callback = function(_, committed)
-				if committed then applyScale() end
-			end,
-		})
 		ui:AddKeybind({
 			Title = "Toggle UI",
 			Description = "Mostra/esconde a janela inteira.",
@@ -3105,19 +3101,55 @@ function Library:CreateWindow(opts)
 		local function pick(t) return t[math.random(#t)] end
 
 		-- ---------- Imagem ----------
-		local parent = mo.Parent or sidebar
+		local placement = mo.Placement or "Top" -- "Top" (apoiada na borda de cima) | "Sidebar"
+		local overlap = mo.Overlap or 24        -- Top: quantos px do corpo descem sobre a borda da janela
+		local behind = mo.Behind ~= false       -- Top: corpo atrás dos elementos da janela (só as mãos ficam na frente)
+		local parent = mo.Parent or (placement == "Sidebar" and sidebar or mainFrame)
 		local button = Instance.new("ImageButton")
 		button.Name = "Mascot"
 		button.BackgroundTransparency = 1
 		button.AutoButtonColor = false
 		button.Size = UDim2.fromOffset(size.X, size.Y)
-		button.AnchorPoint = Vector2.new(0.5, 1)
-		button.Position = mo.Position or UDim2.new(0.5, 0, 1, -10)
 		button.ScaleType = Enum.ScaleType.Fit
+		button.AnchorPoint = Vector2.new(0.5, 1)
+		if placement == "Top" then
+			-- bottom do sprite um pouco abaixo da borda de cima da janela, como se espiasse por cima dela
+			button.Position = mo.Position or UDim2.new(mo.X or 0.62, 0, 0, overlap + (mo.OffsetY or 0))
+			button.ZIndex = behind and 0 or 2
+			topExtra = math.max(size.Y - overlap, 0)
+			applyScale()
+		else
+			button.Position = mo.Position or UDim2.new(0.5, 0, 1, -10)
+			if parent == sidebar then
+				-- a lista de páginas não passa por baixo dela
+				navList.Size = UDim2.new(1, -22, 1, -104 - size.Y)
+			end
+		end
 		button.Parent = parent
-		if parent == sidebar then
-			-- a lista de páginas não passa por baixo dela
-			navList.Size = UDim2.new(1, -22, 1, -104 - size.Y)
+
+		-- Mãos apoiadas na borda (camada por cima do corpo). Assume PNGs do mesmo tamanho/posição do corpo.
+		-- Desligue com Hands = false, ou troque os nomes com HandFiles = {Left = "handL", Right = "handR"}.
+		local handLayers = {}
+		if placement == "Top" and mo.Hands ~= false then
+			local handFiles = mo.HandFiles or {Left = "handL", Right = "handR"}
+			for side, fileName in pairs(handFiles) do
+				local hand = Instance.new("ImageLabel")
+				hand.Name = "Hand" .. side
+				hand.BackgroundTransparency = 1
+				-- irmã do corpo (não filha) pra poder ficar NA FRENTE da janela enquanto o corpo fica atrás
+				hand.Size = button.Size
+				hand.Position = button.Position
+				hand.AnchorPoint = button.AnchorPoint
+				hand.ScaleType = Enum.ScaleType.Fit
+				hand.ZIndex = 3
+				hand.Active = false
+				hand.Parent = parent
+				task.spawn(function()
+					local asset = resolveGithubAsset(folder .. "/" .. fileName .. ".png", gh)
+					if asset and hand.Parent then hand.Image = asset end
+				end)
+				handLayers[side] = hand
+			end
 		end
 
 		local frames, shown = {}, idleName
@@ -3244,6 +3276,7 @@ function Library:CreateWindow(opts)
 
 		return {
 			Image = button,
+			Hands = handLayers,
 			React = function(_, name, duration) react(name, duration) end,
 			Talk = function(_, duration) talkUntil = os.clock() + (duration or 1.5) end,
 		}
