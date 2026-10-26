@@ -2379,8 +2379,15 @@ function Library:CreateWindow(opts)
 	local function styleTabs(page)
 		for _, tab in ipairs(page.Tabs) do
 			local isActive = (tab == page.CurrentTab)
-			tab.Button.TextColor3 = isActive and COLORS.TextPrimary or COLORS.TextMuted
-			tab.Button.FontFace = isActive and FONTS.Title or FONTS.Body
+			-- Nome
+			if tab.NameLabel then
+				tab.NameLabel.TextColor3 = isActive and COLORS.TextPrimary or COLORS.TextMuted
+				tab.NameLabel.FontFace = isActive and FONTS.Title or FONTS.Body
+			end
+			-- Ícone (muda pra cor de destaque quando ativo)
+			if tab.IconElement then
+				setIconColor(tab.IconElement, isActive and COLORS.Accent or COLORS.TextMuted)
+			end
 			tab.Underline.Visible = isActive
 		end
 	end
@@ -2596,10 +2603,12 @@ function Library:CreateWindow(opts)
 		tabLayout.Parent = page.TabBarFrame
 
 		-- [MELHORADO] Suporte a emojis nas tabs via parâmetro Emoji
+				-- [MELHORADO] Suporte a ícones do GitHub/Roblox/emojis nas tabs
 		function page:AddTab(to)
 			to = to or {}
 			local tabName = tostring(to.Name or ("Tab " .. (#page.Tabs + 1)))
-			local tabEmoji = to.Emoji or ""  -- Aceita emoji como string
+			local tabIcon = to.Icon          -- aceita "gh:...", "rbxassetid://...", número, ou nil
+			local tabIconFallback = to.IconFallback or to.Emoji or ""
 			local tab = newTab(page, tabName, to.Columns or page.Columns)
 			page.Tabs[#page.Tabs + 1] = tab
 
@@ -2616,11 +2625,51 @@ function Library:CreateWindow(opts)
 			btn.BackgroundTransparency = 1
 			btn.Size = UDim2.new(0, 0, 1, -4)
 			btn.AutomaticSize = Enum.AutomaticSize.X
-			btn.FontFace = FONTS.Body
-			btn.Text = tabEmoji ~= "" and (tabEmoji .. "  " .. tabName) or tabName
-			btn.TextColor3 = COLORS.TextMuted
-			btn.TextSize = 16
+			btn.Text = "" -- texto vai pro label interno
 			btn.Parent = holder
+
+			-- Layout horizontal: ícone + nome
+			local btnLayout = Instance.new("UIListLayout")
+			btnLayout.FillDirection = Enum.FillDirection.Horizontal
+			btnLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			btnLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+			btnLayout.Padding = UDim.new(0, 6)
+			btnLayout.Parent = btn
+
+			-- Ícone (opcional)
+			local iconElement = nil
+			if tabIcon then
+				iconElement = createIcon({
+					Name = "TabIcon",
+					Size = UDim2.new(0, 18, 0, 18),
+					AssetId = tabIcon,
+					FallbackText = tabIconFallback ~= "" and tabIconFallback or "•",
+					TextSize = 16,
+					ImageColor3 = COLORS.TextMuted,
+				}, btn)
+				iconElement.LayoutOrder = 1
+			elseif tabIconFallback ~= "" then
+				-- Sem Icon, mas com Emoji: usa como texto simples (compatibilidade)
+				local emojiLabel = newLabel({
+					Name = "TabEmoji",
+					Size = UDim2.new(0, 0, 1, 0),
+					Text = tabIconFallback,
+					TextSize = 16,
+				}, btn)
+				emojiLabel.AutomaticSize = Enum.AutomaticSize.X
+				emojiLabel.LayoutOrder = 1
+				iconElement = emojiLabel
+			end
+
+			local nameLabel = newLabel({
+				Name = "TabName",
+				Size = UDim2.new(0, 0, 1, 0),
+				Text = tabName,
+				TextSize = 16,
+				TextColor3 = COLORS.TextMuted,
+			}, btn)
+			nameLabel.AutomaticSize = Enum.AutomaticSize.X
+			nameLabel.LayoutOrder = 2
 
 			local underline = newFrame({
 				Name = "Underline",
@@ -2631,12 +2680,19 @@ function Library:CreateWindow(opts)
 			}, holder)
 
 			tab.Button, tab.Underline = btn, underline
+			tab.NameLabel, tab.IconElement = nameLabel, iconElement  -- referências pro styleTabs
 
 			btn.MouseEnter:Connect(function()
-				if page.CurrentTab ~= tab then btn.TextColor3 = COLORS.TextPrimary end
+				if page.CurrentTab ~= tab then
+					nameLabel.TextColor3 = COLORS.TextPrimary
+					if iconElement then setIconColor(iconElement, COLORS.TextPrimary) end
+				end
 			end)
 			btn.MouseLeave:Connect(function()
-				if page.CurrentTab ~= tab then btn.TextColor3 = COLORS.TextMuted end
+				if page.CurrentTab ~= tab then
+					nameLabel.TextColor3 = COLORS.TextMuted
+					if iconElement then setIconColor(iconElement, COLORS.TextMuted) end
+				end
 			end)
 			btn.MouseButton1Click:Connect(function()
 				if page.CurrentTab == tab then return end
