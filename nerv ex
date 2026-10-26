@@ -1992,7 +1992,7 @@ function Library:CreateWindow(opts)
 	-- ================== SIDEBAR ==================
 	sidebar = newFrame({
 		Name = "Sidebar",
-		Size = UDim2.new(0, 210, 1, 0),
+		Size = UDim2.new(0, 180, 1, 0),
 		BackgroundColor3 = COLORS.Sidebar,
 	}, mainFrame)
 	corner(sidebar, 12)
@@ -2013,8 +2013,8 @@ function Library:CreateWindow(opts)
 
 	local logoHolder = newFrame({
 		Name = "LogoHolder",
-		Size = UDim2.new(1, -32, 0, 50),
-		Position = UDim2.new(0, 16, 0, 14),
+		Size = UDim2.new(1, -24, 0, 50),
+		Position = UDim2.new(0, 12, 0, 14),
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -2060,15 +2060,15 @@ function Library:CreateWindow(opts)
 
 	newFrame({
 		Name = "SidebarDivider",
-		Size = UDim2.new(1, -32, 0, 1),
-		Position = UDim2.new(0, 16, 0, 76),
+		Size = UDim2.new(1, -24, 0, 1),
+		Position = UDim2.new(0, 12, 0, 76),
 		BackgroundColor3 = COLORS.Divider,
 	}, sidebar)
 
 	navList = newFrame({
 		Name = "NavList",
-		Size = UDim2.new(1, -22, 1, -104),
-		Position = UDim2.new(0, 11, 0, 90),
+		Size = UDim2.new(1, -16, 1, -104),
+		Position = UDim2.new(0, 8, 0, 90),
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -2080,8 +2080,8 @@ function Library:CreateWindow(opts)
 	-- ================== CONTAINER DIREITO ==================
 	local rightContainer = newFrame({
 		Name = "RightContainer",
-		Size = UDim2.new(1, -210, 1, 0),
-		Position = UDim2.new(0, 210, 0, 0),
+		Size = UDim2.new(1, -180, 1, 0),
+		Position = UDim2.new(0, 180, 0, 0),
 		BackgroundTransparency = 1,
 	}, mainFrame)
 
@@ -2608,8 +2608,8 @@ function Library:CreateWindow(opts)
 		}, navBtn)
 
 		local navLabel = newLabel({
-			Size = UDim2.new(1, -52, 1, 0),
-			Position = UDim2.new(0, 46, 0, 0),
+			Size = UDim2.new(1, -44, 1, 0),
+			Position = UDim2.new(0, 38, 0, 0),
 			Text = page.Name,
 			Font = Enum.Font.GothamBold,
 			TextColor3 = COLORS.TextMuted,
