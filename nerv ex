@@ -412,6 +412,22 @@ local function addDivider(parent)
 	}, parent)
 end
 
+-- Esconde o divisor da última linha visível do card (a última não leva linha embaixo).
+local function updateDividers(body)
+	local last, lastOrder = nil, -math.huge
+	for _, child in ipairs(body:GetChildren()) do
+		if child:IsA("Frame") and child.Visible and child.LayoutOrder > lastOrder then
+			last, lastOrder = child, child.LayoutOrder
+		end
+	end
+	for _, child in ipairs(body:GetChildren()) do
+		local divider = child:IsA("Frame") and child:FindFirstChild("RowDivider")
+		if divider then
+			divider.Visible = (child ~= last)
+		end
+	end
+end
+
 -- Chevron do dropdown: sempre gira 180° ao abrir/fechar.
 local function createChevron(parent)
 	local icon = createIcon({
@@ -1374,16 +1390,28 @@ function Library:CreateWindow(opts)
 
 	-- API pública de um card (métodos com ":").
 	local function makeCardApi(body, entry)
+		entry.body = body
 		local api = {}
-		function api:AddToggle(o) return addToggle(body, entry, o or {}) end
-		function api:AddDropdown(o) return addDropdown(body, entry, o or {}) end
-		function api:AddSlider(o) return addSlider(body, entry, o or {}) end
-		function api:AddKeybind(o) return addKeybind(body, entry, o or {}) end
-		function api:AddTextbox(o) return addTextbox(body, entry, o or {}) end
-		function api:AddButton(o) return addButton(body, entry, o or {}) end
-		function api:AddLabel(o) return addLabel(body, entry, o or {}) end
-		function api:AddKeyInput(o) return addKeyInput(body, entry, o or {}) end
-		function api:AddSeparator() return addSeparator(body) end
+		local function wrap(fn)
+			return function(_, o)
+				local result = fn(body, entry, o or {})
+				updateDividers(body)
+				return result
+			end
+		end
+		api.AddToggle = wrap(addToggle)
+		api.AddDropdown = wrap(addDropdown)
+		api.AddSlider = wrap(addSlider)
+		api.AddKeybind = wrap(addKeybind)
+		api.AddTextbox = wrap(addTextbox)
+		api.AddButton = wrap(addButton)
+		api.AddLabel = wrap(addLabel)
+		api.AddKeyInput = wrap(addKeyInput)
+		function api:AddSeparator()
+			local result = addSeparator(body)
+			updateDividers(body)
+			return result
+		end
 		return api
 	end
 
@@ -1775,6 +1803,14 @@ function Library:CreateWindow(opts)
 		BackgroundTransparency = 1,
 	}, rightContainer)
 
+	-- Linha separando a barra superior (título, busca, minimizar/fechar) do resto.
+	newFrame({
+		Name = "TopBarDivider",
+		Size = UDim2.new(1, 0, 0, 1),
+		Position = UDim2.new(0, 0, 0, 56),
+		BackgroundColor3 = COLORS.Divider,
+	}, rightContainer)
+
 	local pageTitleLabel, pageCounterLabel, searchInput
 
 	do
@@ -1944,14 +1980,14 @@ function Library:CreateWindow(opts)
 	local tabBar = newFrame({
 		Name = "TabBar",
 		Size = UDim2.new(1, -28, 0, 32),
-		Position = UDim2.new(0, 14, 0, 58),
+		Position = UDim2.new(0, 14, 0, 68),
 		BackgroundTransparency = 1,
 	}, rightContainer)
 
 	newFrame({
 		Name = "TabBarDivider",
 		Size = UDim2.new(1, -28, 0, 1),
-		Position = UDim2.new(0, 14, 0, 92),
+		Position = UDim2.new(0, 14, 0, 102),
 		BackgroundColor3 = COLORS.Divider,
 	}, rightContainer)
 
@@ -1959,8 +1995,8 @@ function Library:CreateWindow(opts)
 	contentCanvas = Instance.new("CanvasGroup")
 	contentCanvas.Name = "ContentCanvas"
 	contentCanvas.BackgroundTransparency = 1
-	contentCanvas.Size = UDim2.new(1, -28, 1, -112)
-	contentCanvas.Position = UDim2.new(0, 14, 0, 104)
+	contentCanvas.Size = UDim2.new(1, -28, 1, -122)
+	contentCanvas.Position = UDim2.new(0, 14, 0, 114)
 	contentCanvas.GroupTransparency = 0
 	contentCanvas.Parent = rightContainer
 
@@ -2050,6 +2086,7 @@ function Library:CreateWindow(opts)
 				anyRowVisible = anyRowVisible or show
 			end
 			local showCard = cardMatches or anyRowVisible
+			if entry.body then updateDividers(entry.body) end
 			entry.card.Visible = showCard
 			anyCardVisible = anyCardVisible or showCard
 		end
