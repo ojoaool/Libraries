@@ -1,5 +1,5 @@
 --[[
-	NERV UI Library v1.3.1
+	NERV UI Library v1.3.2
 	Biblioteca de UI pra executor (Roblox). Hospede este arquivo no GitHub e use:
 
 		local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/USUARIO/REPO/main/NervLib.lua"))()
@@ -61,7 +61,7 @@
 		Placement = "Top" | "Sidebar",                 -- Top (padrão): apoiada na borda de cima da janela
 		X = 0.62, Overlap = 24, OffsetY = 0,           -- Top: posição horizontal (0-1), quanto desce sobre a borda, ajuste fino
 		Behind = true,                                 -- Top: corpo atrás da janela, só as mãos na frente
-		Hands = true, HandFiles = {Left="handL-hands", Right="handR-hands"},  -- camadas de mãos (mesmo tamanho do corpo)
+		Hands = false, HandFiles = {Left="handL-hands", Right="handR-hands"},  -- camadas de mãos por cima da janela (opt-in; mesmo tamanho do corpo)
 		Position = UDim2, Parent = Instance,           -- opcionais
 		SleepAfter, Deadzone, FastSpeed,               -- opcionais
 	}) -> {Image, Hands, React(name, secs), Talk(secs)}
@@ -108,7 +108,7 @@ local COLORS = {
 }
 
 local Library = {
-	Version = "1.3.1",
+	Version = "1.3.2",
 	Colors = COLORS,
 	CacheDir = "NervLib",
 
@@ -3128,9 +3128,9 @@ function Library:CreateWindow(opts)
 		button.Parent = parent
 
 		-- Mãos apoiadas na borda (camada por cima do corpo). Assume PNGs do mesmo tamanho/posição do corpo.
-		-- Desligue com Hands = false, ou troque os nomes com HandFiles = {Left = "handL-hands", Right = "handR-hands"}.
+		-- Só liga com Hands = true. Troque os nomes com HandFiles = {Left = "handL-hands", Right = "handR-hands"}.
 		local handLayers = {}
-		if placement == "Top" and mo.Hands ~= false then
+		if placement == "Top" and mo.Hands == true then
 			local handFiles = mo.HandFiles or {Left = "handL-hands", Right = "handR-hands"}
 			for side, fileName in pairs(handFiles) do
 				local hand = Instance.new("ImageLabel")
@@ -3169,6 +3169,24 @@ function Library:CreateWindow(opts)
 				end
 			end)
 		end
+
+		-- diagnóstico: avisa no console se os frames não chegaram (repo/branch/pasta errados, HTTP bloqueado...)
+		task.delay(10, function()
+			if unloaded then return end
+			local loaded, missing = 0, {}
+			for _, name in ipairs(NAMES) do
+				if frames[name] then loaded = loaded + 1 else missing[#missing + 1] = name end
+			end
+			local g = gh or Library.Github
+			if loaded == 0 then
+				warn(string.format("[NervLib] Mascote: NENHUM frame baixou de %s. Confira User/Repo/Branch/Folder e se getcustomasset/writefile existem no executor.",
+					rawUrl(folder .. "/" .. idleName .. ".png", g)))
+			elseif #missing > 0 then
+				warn("[NervLib] Mascote: " .. #missing .. " frame(s) não baixaram: " .. table.concat(missing, ", "))
+			else
+				print("[NervLib] Mascote: " .. loaded .. " frames carregados.")
+			end
+		end)
 
 		-- ---------- Estado ----------
 		local reactName, reactUntil = nil, 0
