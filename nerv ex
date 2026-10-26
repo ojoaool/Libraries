@@ -909,6 +909,344 @@ function Library:CreateWindow(opts)
 		return api
 	end
 
+    	-- ---------- PROGRESS BAR ----------
+	local function addProgressBar(body, entry, o)
+		local rowTitle, description = o.Title or "Progress", o.Description or ""
+		local flag = o.Flag
+		local min, max = o.Min or 0, o.Max or 100
+		local suffix = o.Suffix or ""
+
+		local row = newFrame({Name = "ProgressRow", Size = UDim2.new(1, 0, 0, 68), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 0.6)
+		registerRow(entry, row, rowTitle .. " " .. description)
+
+		local valueLabel = newLabel({
+			Size = UDim2.new(0.4, -4, 0, 18),
+			Position = UDim2.new(0.6, 4, 0, 0),
+			Text = "",
+			TextSize = 14,
+			TextColor3 = COLORS.TextMuted,
+			TextXAlignment = Enum.TextXAlignment.Right,
+		}, row)
+
+		local track = newFrame({
+			Name = "ProgressTrack",
+			Size = UDim2.new(1, 0, 0, 8),
+			Position = UDim2.new(0, 0, 0, 46),
+			BackgroundColor3 = COLORS.ToggleOff,
+			Corner = 4,
+		}, row)
+
+		local fill = newFrame({
+			Name = "ProgressFill",
+			Size = UDim2.new(0, 0, 1, 0),
+			BackgroundColor3 = COLORS.Accent,
+			Corner = 4,
+		}, track)
+
+		local currentValue = math.clamp(saved(flag, o.Default or min), min, max)
+		initFlag(flag, currentValue)
+		local fillTween
+
+		local function render(animate)
+			local ratio = max > min and math.clamp((currentValue - min) / (max - min), 0, 1) or 0
+			valueLabel.Text = tostring(currentValue) .. suffix
+			if fillTween then fillTween:Cancel() end
+			if animate then
+				fillTween = TweenService:Create(fill,
+					TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+					{Size = UDim2.new(ratio, 0, 1, 0)})
+				fillTween:Play()
+			else
+				fill.Size = UDim2.new(ratio, 0, 1, 0)
+			end
+		end
+
+		render(false)
+		addDivider(row)
+
+		local api = {Row = row}
+		function api:Get() return currentValue end
+		function api:SetValue(value, animate)
+			currentValue = math.clamp(value, min, max)
+			render(animate ~= false)
+			setFlag(flag, currentValue)
+		end
+		api.Set = api.SetValue
+		function api:SetMax(newMax)
+			max = newMax
+			currentValue = math.clamp(currentValue, min, max)
+			render(true)
+		end
+
+		return api
+	end
+
+    	-- ---------- MULTI DROPDOWN ----------
+	local function addMultiDropdown(body, entry, o)
+		local rowTitle, description = o.Title or "Multi Select", o.Description or ""
+		local flag = o.Flag
+		local currentOptions = o.Options or {}
+		local selected = {}
+
+		-- Default: table, valor único ou nil
+		if type(o.Default) == "table" then
+			for _, v in ipairs(o.Default) do selected[v] = true end
+		elseif o.Default ~= nil then
+			selected[o.Default] = true
+		end
+
+		-- Restaurar salvo (array JSON)
+		local savedValue = flag and savedFlags[flag]
+		if type(savedValue) == "table" then
+			selected = {}
+			for _, v in ipairs(savedValue) do selected[v] = true end
+		end
+
+		local row = newFrame({Name = "MultiDropdownRow", Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1}, body)
+		row.LayoutOrder = nextOrder(body)
+		addRowHeader(row, rowTitle, description, 0.5)
+		registerRow(entry, row, rowTitle .. " " .. description)
+
+		local dropdownBtn = newButton({
+			Name = "MultiDropdown",
+			Size = UDim2.new(0.46, 0, 0, 36),
+			Position = UDim2.new(0.54, 0, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = COLORS.Field,
+			Corner = 7,
+		}, row)
+		stroke(dropdownBtn, COLORS.PanelBorder, 1)
+		addHover(dropdownBtn, COLORS.Field, COLORS.FieldHover)
+
+		local valueLabel = newLabel({
+			Size = UDim2.new(1, -38, 1, 0),
+			Position = UDim2.new(0, 12, 0, 0),
+			Text = "",
+			TextSize = 14,
+			Truncate = true,
+		}, dropdownBtn)
+
+		local _, setChevronOpen = createChevron(dropdownBtn)
+		addDivider(row)
+
+		local function getSelectedList()
+			local list = {}
+			for _, opt in ipairs(currentOptions) do
+				if selected[opt] then table.insert(list, opt) end
+			end
+			return list
+		end
+
+		local function updateLabel()
+			local list = getSelectedList()
+			if #list == 0 then
+				valueLabel.Text = "Nenhum"
+				valueLabel.TextColor3 = COLORS.TextMuted
+			elseif #list == 1 then
+				valueLabel.Text = list[1]
+				valueLabel.TextColor3 = COLORS.TextPrimary
+			else
+				valueLabel.Text = list[1] .. " +" .. (#list - 1)
+				valueLabel.TextColor3 = COLORS.TextPrimary
+			end
+		end
+
+		local function commit()
+			local list = getSelectedList()
+			setFlag(flag, list)
+			fire(o.Callback, list)
+			updateLabel()
+		end
+
+		local listFrame
+		local ROW_HEIGHT = 32
+		local optionRows = {}
+
+		local function closeList()
+			if not listFrame then return end
+			setChevronOpen(false)
+			overlayCatcher.Visible = false
+
+			local frameToClose = listFrame
+			listFrame = nil
+			optionRows = {}
+			if closeOpenDropdown == closeList then
+				closeOpenDropdown = nil
+			end
+
+			local closeTween = TweenService:Create(frameToClose,
+				TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{Size = UDim2.new(0, frameToClose.Size.X.Offset, 0, 0)})
+			closeTween.Completed:Once(function()
+				frameToClose:Destroy()
+			end)
+			closeTween:Play()
+		end
+
+		local function toggleOption(opt)
+			selected[opt] = not selected[opt] or nil
+			commit()
+			-- atualiza visual do checkbox da linha
+			local rowRefs = optionRows[opt]
+			if rowRefs then
+				local isOn = selected[opt] == true
+				rowRefs.box.BackgroundColor3 = isOn and COLORS.Accent or COLORS.Field
+				rowRefs.stroke.Color = isOn and COLORS.Accent or COLORS.PanelBorder
+				rowRefs.check.Visible = isOn
+				rowRefs.label.TextColor3 = isOn and COLORS.Accent or COLORS.TextPrimary
+			end
+		end
+
+		local function openList()
+			closeAnyOpenDropdown()
+			setChevronOpen(true)
+			overlayCatcher.Visible = true
+
+			local scale = uiScale.Scale
+			local targetHeight = math.min(#currentOptions, 8) * ROW_HEIGHT
+			local btnPos, btnSize = dropdownBtn.AbsolutePosition, dropdownBtn.AbsoluteSize
+			local ovPos = overlay.AbsolutePosition
+			local screenBottom = screenGui.AbsolutePosition.Y + screenGui.AbsoluteSize.Y
+			local openUp = (btnPos.Y + btnSize.Y + 4 + targetHeight * scale) > screenBottom
+
+			local width = btnSize.X / scale
+			local x = (btnPos.X - ovPos.X) / scale
+
+			listFrame = newFrame({
+				Name = "MultiDropdownList",
+				BackgroundColor3 = COLORS.Field,
+				Corner = 7,
+				ClipsDescendants = true,
+			}, overlay)
+			listFrame.ZIndex = 201
+			stroke(listFrame, COLORS.PanelBorder, 1)
+
+			local listScroll = Instance.new("ScrollingFrame")
+			listScroll.Name = "OptionsScroll"
+			listScroll.BackgroundTransparency = 1
+			listScroll.BorderSizePixel = 0
+			listScroll.Size = UDim2.new(1, 0, 1, 0)
+			listScroll.ScrollBarThickness = 3
+			listScroll.ScrollBarImageColor3 = COLORS.Scroll
+			listScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+			listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+			listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+			listScroll.ZIndex = 202
+			listScroll.Parent = listFrame
+
+			local listLayout = Instance.new("UIListLayout")
+			listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			listLayout.Parent = listScroll
+
+			for i, opt in ipairs(currentOptions) do
+				local isOn = selected[opt] == true
+				local optionBtn = newButton({
+					Name = "Option" .. i,
+					Size = UDim2.new(1, 0, 0, ROW_HEIGHT),
+					BackgroundColor3 = COLORS.Field,
+					Text = "",
+				}, listScroll)
+				optionBtn.LayoutOrder = i
+				optionBtn.ZIndex = 202
+				addHover(optionBtn, COLORS.Field, COLORS.FieldHover)
+
+				local checkbox = newFrame({
+					Name = "Checkbox",
+					Size = UDim2.new(0, 16, 0, 16),
+					Position = UDim2.new(0, 12, 0.5, 0),
+					AnchorPoint = Vector2.new(0, 0.5),
+					BackgroundColor3 = isOn and COLORS.Accent or COLORS.Field,
+					Corner = 4,
+				}, optionBtn)
+				checkbox.ZIndex = 203
+				local cbStroke = stroke(checkbox, isOn and COLORS.Accent or COLORS.PanelBorder, 1)
+				cbStroke.ZIndex = 203
+
+				local check = newLabel({
+					Name = "Check",
+					Size = UDim2.new(1, 0, 1, 0),
+					Text = "✓",
+					TextSize = 12,
+					TextColor3 = COLORS.AccentDark,
+					TextXAlignment = Enum.TextXAlignment.Center,
+				}, checkbox)
+				check.ZIndex = 204
+				check.Visible = isOn
+
+				local optLabel = newLabel({
+					Size = UDim2.new(1, -44, 1, 0),
+					Position = UDim2.new(0, 36, 0, 0),
+					Text = opt,
+					TextSize = 14,
+					TextColor3 = isOn and COLORS.Accent or COLORS.TextPrimary,
+					Truncate = true,
+				}, optionBtn)
+				optLabel.ZIndex = 203
+
+				optionRows[opt] = {box = checkbox, stroke = cbStroke, check = check, label = optLabel}
+
+				optionBtn.MouseButton1Click:Connect(function()
+					toggleOption(opt)
+				end)
+			end
+
+			if openUp then
+				listFrame.AnchorPoint = Vector2.new(0, 1)
+				listFrame.Position = UDim2.new(0, x, 0, (btnPos.Y - ovPos.Y) / scale - 4)
+			else
+				listFrame.Position = UDim2.new(0, x, 0, (btnPos.Y - ovPos.Y + btnSize.Y) / scale + 4)
+			end
+			listFrame.Size = UDim2.new(0, width, 0, 0)
+
+			TweenService:Create(listFrame,
+				TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{Size = UDim2.new(0, width, 0, targetHeight)}):Play()
+
+			closeOpenDropdown = closeList
+		end
+
+		dropdownBtn.MouseButton1Click:Connect(function()
+			if listFrame then closeList() else openList() end
+		end)
+
+		updateLabel()
+		initFlag(flag, getSelectedList())
+
+		local api = {Row = row}
+		function api:Get() return getSelectedList() end
+		function api:Set(values)
+			selected = {}
+			if type(values) == "table" then
+				for _, v in ipairs(values) do selected[v] = true end
+			elseif values ~= nil then
+				selected[values] = true
+			end
+			commit()
+		end
+		function api:Toggle(value, state)
+			if state == nil then
+				selected[value] = not selected[value] or nil
+			else
+				selected[value] = state and true or nil
+			end
+			commit()
+		end
+		function api:SetOptions(newOptions)
+			if listFrame then closeList() end
+			currentOptions = newOptions or {}
+			-- remove seleções que não existem mais
+			for v in pairs(selected) do
+				if not table.find(currentOptions, v) then selected[v] = nil end
+			end
+			commit()
+		end
+
+		if o.CallOnLoad then fire(o.Callback, getSelectedList()) end
+		return api
+	end
+
 	-- ---------- KEYBIND ----------
 	-- Registro ÚNICO de atalhos: os elementos AddKeybind e os atalhos criados por código
 	-- (Window:RegisterKeybind) vivem na mesma tabela, então aparecem juntos na lista Ctrl+B
@@ -1304,7 +1642,9 @@ function Library:CreateWindow(opts)
 		end
 		api.AddToggle = wrap(addToggle)
 		api.AddDropdown = wrap(addDropdown)
+        api.AddMultiDropdown = wrap(addMultiDropdown) 
 		api.AddSlider = wrap(addSlider)
+        api.AddProgressBar = wrap(addProgressBar) 
 		api.AddKeybind = wrap(addKeybind)
 		api.AddTextbox = wrap(addTextbox)
 		api.AddButton = wrap(addButton)
