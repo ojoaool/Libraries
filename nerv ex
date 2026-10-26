@@ -1,5 +1,5 @@
 --[[
-	NERV UI Library v1.3.2
+	NERV UI Library v1.3.2 (Compact Sidebar)
 	Biblioteca de UI pra executor (Roblox). Hospede este arquivo no GitHub e use:
 
 		local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/USUARIO/REPO/main/NervLib.lua"))()
@@ -1989,10 +1989,10 @@ function Library:CreateWindow(opts)
 		fadeOut:Play()
 	end
 
-	-- ================== SIDEBAR ==================
+	-- ================== SIDEBAR COMPACTA (180PX) ==================
 	sidebar = newFrame({
 		Name = "Sidebar",
-		Size = UDim2.new(0, 180, 1, 0),
+		Size = UDim2.new(0, 180, 1, 0), -- REDUZIDO DE 210 PARA 180
 		BackgroundColor3 = COLORS.Sidebar,
 	}, mainFrame)
 	corner(sidebar, 12)
@@ -2013,8 +2013,8 @@ function Library:CreateWindow(opts)
 
 	local logoHolder = newFrame({
 		Name = "LogoHolder",
-		Size = UDim2.new(1, -24, 0, 50),
-		Position = UDim2.new(0, 12, 0, 14),
+		Size = UDim2.new(1, -24, 0, 50), -- AJUSTADO: De -32 para -24
+		Position = UDim2.new(0, 12, 0, 14), -- AJUSTADO: De 16 para 12
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -2060,15 +2060,15 @@ function Library:CreateWindow(opts)
 
 	newFrame({
 		Name = "SidebarDivider",
-		Size = UDim2.new(1, -24, 0, 1),
-		Position = UDim2.new(0, 12, 0, 76),
+		Size = UDim2.new(1, -24, 0, 1), -- AJUSTADO: De -32 para -24
+		Position = UDim2.new(0, 12, 0, 76), -- AJUSTADO: De 16 para 12
 		BackgroundColor3 = COLORS.Divider,
 	}, sidebar)
 
 	navList = newFrame({
 		Name = "NavList",
-		Size = UDim2.new(1, -16, 1, -104),
-		Position = UDim2.new(0, 8, 0, 90),
+		Size = UDim2.new(1, -16, 1, -104), -- AJUSTADO: De -22 para -16
+		Position = UDim2.new(0, 8, 0, 90), -- AJUSTADO: De 11 para 8
 		BackgroundTransparency = 1,
 	}, sidebar)
 
@@ -2077,11 +2077,11 @@ function Library:CreateWindow(opts)
 	navLayout.Padding = UDim.new(0, 4)
 	navLayout.Parent = navList
 
-	-- ================== CONTAINER DIREITO ==================
+	-- ================== CONTAINER DIREITO (AJUSTADO PARA 180PX) ==================
 	local rightContainer = newFrame({
 		Name = "RightContainer",
-		Size = UDim2.new(1, -180, 1, 0),
-		Position = UDim2.new(0, 180, 0, 0),
+		Size = UDim2.new(1, -180, 1, 0), -- AJUSTADO: De -210 para -180
+		Position = UDim2.new(0, 180, 0, 0), -- AJUSTADO: De 210 para 180
 		BackgroundTransparency = 1,
 	}, mainFrame)
 
@@ -2608,8 +2608,8 @@ function Library:CreateWindow(opts)
 		}, navBtn)
 
 		local navLabel = newLabel({
-			Size = UDim2.new(1, -44, 1, 0),
-			Position = UDim2.new(0, 38, 0, 0),
+			Size = UDim2.new(1, -44, 1, 0), -- AJUSTADO: De -52 para -44
+			Position = UDim2.new(0, 38, 0, 0), -- AJUSTADO: De 46 para 38
 			Text = page.Name,
 			Font = Enum.Font.GothamBold,
 			TextColor3 = COLORS.TextMuted,
@@ -2777,11 +2777,11 @@ function Library:CreateWindow(opts)
 		local page = Window:AddPage({
 			Name = so.Name or "Settings",
 			Icon = so.Icon,
-			IconFallback = "⚙️",
+			IconFallback = "️",
 			Columns = 1,
 		})
 
-		local ui = page:AddCard({Title = "INTERFACE", IconFallback = "🖥️"})
+		local ui = page:AddCard({Title = "INTERFACE", IconFallback = "️"})
 		ui:AddToggle({
 			Title = "Notificações",
 			Description = "Mostra avisos no canto da tela (erros sempre aparecem).",
@@ -3122,7 +3122,7 @@ function Library:CreateWindow(opts)
 			button.Position = mo.Position or UDim2.new(0.5, 0, 1, -10)
 			if parent == sidebar then
 				-- a lista de páginas não passa por baixo dela
-				navList.Size = UDim2.new(1, -22, 1, -104 - size.Y)
+				navList.Size = UDim2.new(1, -16, 1, -104 - size.Y) -- AJUSTADO: De -22 para -16
 			end
 		end
 		button.Parent = parent
