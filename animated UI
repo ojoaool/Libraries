@@ -1,5 +1,5 @@
 --[[
-	FarmUI Library v3.0
+	FarmUI Library v3.1
 	────────────────────────────────────────────────────────────────────────────
 	Carregar:
 		local FarmUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/SEU_USER/SEU_REPO/main/FarmUI.lua"))()
@@ -18,10 +18,21 @@
 		Todos os callbacks rodam protegidos (um erro não derruba a UI).
 
 	Sinais da janela: Closed, TabChanged, VisibilityChanged, ConfigSaved, ConfigLoaded
-	Configs: Window:SaveConfig / LoadConfig / DeleteConfig / ListConfigs / SetAutoLoad / LoadAutoConfig
+	Configs: Window:SaveConfig / LoadConfig(nome, silent) / DeleteConfig / ListConfigs / SetAutoLoad / LoadAutoConfig
+
+	Mudanças v3.1:
+		- Signal:Wait valida que está em thread que pode yieldar
+		- valuesEqual compara tabelas genéricas (array + chaves)
+		- Dropdown: isSelected protegido contra el == nil
+		- SetDisabled só existe em elementos interativos (overlay não é mais criado em Label/Section/Divider/Status/ProgressBar)
+		- Button: Clicked agora é um sinal próprio (Changed continua disparando)
+		- Esconder/minimizar a janela cancela a captura de keybind em andamento
+		- Keybind recusa a tecla do menu (a não ser que AllowMenuKey = true)
+		- LoadConfig(nome, silent): silent = true carrega sem disparar callbacks
+		- getTextWidth com cache
 ]]
 
-local Library = { Version = "3.0.0", Windows = {} }
+local Library = { Version = "3.1.0", Windows = {} }
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -74,7 +85,9 @@ function Signal:Once(fn)
 	return conn
 end
 
+-- Precisa ser chamado dentro de uma thread (ex: task.spawn(function() sig:Wait() end))
 function Signal:Wait()
+	assert(coroutine.isyieldable(), "[FarmUI] Signal:Wait() precisa rodar dentro de uma thread (task.spawn)")
 	local co = coroutine.running()
 	self:Once(function(...) task.spawn(co, ...) end)
 	return coroutine.yield()
@@ -93,11 +106,15 @@ end
 
 Library.Signal = Signal
 
+-- compara valores simples e tabelas (array e chaves nomeadas), sem profundidade infinita
 local function valuesEqual(a, b)
 	if type(a) == "table" and type(b) == "table" then
-		if #a ~= #b then return false end
-		for i = 1, #a do
-			if a[i] ~= b[i] then return false end
+		if a == b then return true end
+		for k, v in pairs(a) do
+			if b[k] ~= v then return false end
+		end
+		for k in pairs(b) do
+			if a[k] == nil then return false end
 		end
 		return true
 	end
@@ -355,8 +372,14 @@ local function isMove(i)
 	return i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch
 end
 
--- mede o texto com a mesma fonte das abas
+-- mede o texto com a mesma fonte das abas (com cache: GetTextBoundsAsync é caro)
+local textWidthCache = {}
 local function getTextWidth(text, fontSize)
+	text = tostring(text)
+	local key = fontSize .. "|" .. text
+	local cached = textWidthCache[key]
+	if cached then return cached end
+
 	local ok, w = pcall(function()
 		local params = Instance.new("GetTextBoundsParams")
 		params.Text = text
@@ -365,8 +388,14 @@ local function getTextWidth(text, fontSize)
 		params.Width = math.huge
 		return TextService:GetTextBoundsAsync(params).X
 	end)
-	if ok and w then return math.ceil(w) end
-	return TextService:GetTextSize(text, fontSize, Enum.Font.GothamBold, Vector2.new(math.huge, math.huge)).X
+	local result
+	if ok and w then
+		result = math.ceil(w)
+	else
+		result = TextService:GetTextSize(text, fontSize, Enum.Font.GothamBold, Vector2.new(math.huge, math.huge)).X
+	end
+	textWidthCache[key] = result
+	return result
 end
 
 local lastWindow
@@ -844,6 +873,18 @@ function Library:CreateWindow(cfg)
 
 	local keybinds, listening = {}, nil
 
+	-- cancela a captura de tecla em andamento (usado ao esconder/minimizar a janela)
+	local function cancelListening()
+		if listening then
+			local el = listening
+			listening = nil
+			el._render(el._value)
+		end
+	end
+
+	-- só estes tipos suportam SetDisabled (ganham overlay)
+	local INTERACTIVE = { Toggle = true, Slider = true, Dropdown = true, Button = true, Keybind = true, Input = true }
+
 	local ElementMethods = {}
 	ElementMethods.__index = ElementMethods
 	ElementMethods.__call = function(self, ...)
@@ -887,6 +928,7 @@ function Library:CreateWindow(cfg)
 	end
 
 	function ElementMethods:SetDisabled(d)
+		if not self._overlay then return end -- Label/Section/Divider/Status/ProgressBar não têm estado desabilitado
 		self._disabled = d and true or false
 		self._overlay.Visible = self._disabled
 	end
@@ -912,11 +954,13 @@ function Library:CreateWindow(cfg)
 			Type = kind, Frame = row, Card = card, Flag = o.Flag, Text = o.Text or o.Title or kind,
 			Changed = Signal.new(), _callback = o.Callback, _disabled = false, _conns = {},
 		}, ElementMethods)
-		el._overlay = new("Frame", {
-			Size = UDim2.fromScale(1, 1), BackgroundColor3 = T.card, BackgroundTransparency = 0.4,
-			BorderSizePixel = 0, Visible = false, ZIndex = 10,
-		}, row)
-		corner(el._overlay, 6)
+		if INTERACTIVE[kind] then
+			el._overlay = new("Frame", {
+				Size = UDim2.fromScale(1, 1), BackgroundColor3 = T.card, BackgroundTransparency = 0.4,
+				BorderSizePixel = 0, Visible = false, ZIndex = 10,
+			}, row)
+			corner(el._overlay, 6)
+		end
 		card:_register(el)
 		attachTooltip(row, o.Tooltip)
 		return el
@@ -1167,6 +1211,7 @@ function Library:CreateWindow(cfg)
 			return (v == nil and "None" or tostring(v)) .. "  ▾"
 		end
 		local function isSelected(opt)
+			if not el then return false end -- protege contra chamada antes do elemento existir
 			if multi then return table.find(el._value, opt) ~= nil end
 			return el._value == opt
 		end
@@ -1273,6 +1318,7 @@ function Library:CreateWindow(cfg)
 	-- ── Button ────────────────────────────────────────────────────────────────
 	-- AddButton(texto, callback)  ou  AddButton({ Text, Callback, Style = "primary"|"secondary"|"danger", Tooltip })
 	-- Sinal: el.Clicked:Connect(fn)   |   el:Click() dispara manualmente
+	-- (el.Changed também dispara, por compatibilidade; el:Get() retorna nil — botão não tem valor)
 	function CardMethods:AddButton(a, b)
 		local o = type(a) == "table" and a or { Text = a, Callback = b }
 		local styles = {
@@ -1290,12 +1336,18 @@ function Library:CreateWindow(cfg)
 
 		local el = makeElement(self, "Button", b2, o)
 		el._label, el._prefix = b2, prefix
-		el.Clicked = el.Changed
+		el.Clicked = Signal.new()
 		function el:Click()
 			if self._disabled then return end
 			react("excited", 1.4)
+			self.Clicked:Fire()
 			self.Changed:Fire()
 			safeCall(self._callback)
+		end
+		local baseDestroy = el._onDestroy
+		el._onDestroy = function()
+			if baseDestroy then baseDestroy() end
+			el.Clicked:DisconnectAll()
 		end
 
 		b2.MouseEnter:Connect(function() tween(b2, { BackgroundColor3 = style[2] }) end)
@@ -1310,8 +1362,9 @@ function Library:CreateWindow(cfg)
 
 	-- ── Keybind ───────────────────────────────────────────────────────────────
 	-- AddKeybind({ Text, Default = Enum.KeyCode.X, Callback = ao PRESSIONAR a tecla,
-	--              ChangedCallback = ao TROCAR a tecla, Flag })
+	--              ChangedCallback = ao TROCAR a tecla, Flag, AllowMenuKey })
 	-- Sinais: el.Pressed (tecla pressionada), el.Changed (tecla trocada). Esc limpa.
+	-- A tecla de abrir/fechar o menu é recusada, a não ser que AllowMenuKey = true.
 	function CardMethods:AddKeybind(a, b, c)
 		local o = type(a) == "table" and a or { Text = a, Default = b, Callback = c }
 		local ctrl = splitRow(self.Frame, o.Text or "Keybind", 84, 56, 22)
@@ -1351,12 +1404,18 @@ function Library:CreateWindow(cfg)
 		end
 		function el:_finishListen(keycode)
 			listening = nil
+			if keycode == toggleKey and not o.AllowMenuKey then
+				self._render(self._value)
+				Window:Notify("Essa tecla já abre/fecha o menu", "warning")
+				return
+			end
 			self:Set(keycode == Enum.KeyCode.Escape and "None" or keycode.Name)
 		end
 		el._onDestroy = function()
 			local i = table.find(keybinds, el)
 			if i then table.remove(keybinds, i) end
 			if listening == el then listening = nil end
+			el.Pressed:DisconnectAll()
 		end
 		table.insert(keybinds, el)
 
@@ -1714,7 +1773,9 @@ function Library:CreateWindow(cfg)
 		return true
 	end
 
-	function Window:LoadConfig(name)
+	-- silent = true: aplica os valores sem disparar callbacks/sinais (não liga farm sozinho, por ex.)
+	-- Depois, chame Window:FireAll() se quiser sincronizar o estado manualmente.
+	function Window:LoadConfig(name, silent)
 		if not (readfile and isfile) then return false, "readfile indisponível" end
 		name = sanitizeName(name)
 		local path = configPath(name)
@@ -1724,8 +1785,8 @@ function Library:CreateWindow(cfg)
 		local loaded = 0
 		for flag, value in pairs(data) do
 			local el = self.Elements[flag]
-			if el then
-				local okSet = pcall(el.Set, el, value)
+			if el and el.Set then
+				local okSet = pcall(el.Set, el, value, silent and true or false)
 				if okSet then loaded += 1 end
 			end
 		end
@@ -1755,7 +1816,7 @@ function Library:CreateWindow(cfg)
 	end
 
 	function Window:SetAutoLoad(name)
-		if not (writefile and ensureFolder) then return false end
+		if not writefile then return false end
 		ensureFolder(self.ConfigFolder)
 		local path = self.ConfigFolder .. "/autoload.txt"
 		if name and name ~= "" then
@@ -1775,10 +1836,10 @@ function Library:CreateWindow(cfg)
 	end
 
 	-- chame no FIM da construção da UI
-	function Window:LoadAutoConfig()
+	function Window:LoadAutoConfig(silent)
 		local name = self:GetAutoLoad()
 		if not name then return false end
-		return self:LoadConfig(name)
+		return self:LoadConfig(name, silent)
 	end
 
 	-- dispara os callbacks de todos os elementos com Flag (inicializa o estado)
@@ -1807,6 +1868,9 @@ function Library:CreateWindow(cfg)
 		if state then
 			scale.Scale = baseScale * 0.94
 			tween(scale, { Scale = baseScale }, 0.25, Enum.EasingStyle.Back)
+		else
+			cancelListening()
+			tip.Visible = false
 		end
 		closeDropdown()
 		self.VisibilityChanged:Fire(state)
@@ -1817,6 +1881,7 @@ function Library:CreateWindow(cfg)
 		minimized = state and true or false
 		body.Visible = not minimized
 		closeDropdown()
+		if minimized then cancelListening() end
 		tween(root, { Size = UDim2.fromOffset(W, minimized and HEADER_H or H) }, 0.25, Enum.EasingStyle.Quint)
 	end
 
@@ -1825,6 +1890,7 @@ function Library:CreateWindow(cfg)
 		self._destroyed = true
 		self.Closed:Fire()
 		closeDropdown()
+		listening = nil
 		for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
 		table.clear(conns)
 		for _, el in pairs(self.Elements) do el.Changed:DisconnectAll() end
@@ -1958,7 +2024,7 @@ function Library:CreateWindow(cfg)
 
 		-- Interface
 		local ui = right:AddCard("Interface", "I", T.purple)
-		ui:AddKeybind({ Text = "Menu key", Default = toggleKey, ChangedCallback = function(v)
+		ui:AddKeybind({ Text = "Menu key", Default = toggleKey, AllowMenuKey = true, ChangedCallback = function(v)
 			local ok, key = pcall(function() return Enum.KeyCode[v] end)
 			if ok and key and v ~= "None" then self:SetToggleKey(key) end
 		end })
