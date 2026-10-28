@@ -281,6 +281,7 @@ Window.__index, Tab.__index, SubTab.__index, Card.__index = Window, Tab, SubTab,
 local DESIGN_W, DESIGN_H = 1120, 864
 local COL_X = { Left = 0, Right = 547 }
 local COL_W = { Left = 526, Right = 525 }
+local FULL_W = 1073 -- largura quando só há uma coluna de cards
 local CARD_GAP = 20
 local PAGE_X, PAGE_Y = 23, 160
 
@@ -641,6 +642,7 @@ function Tab:AddSubTab(opts)
 	local name = opts.Name or "SubTab"
 	local sub = setmetatable({
 		tab = self, name = name, cards = {}, columns = { Left = {}, Right = {} },
+		autoFit = opts.AutoFit ~= false, -- 1 coluna só => cards ocupam a largura toda
 	}, SubTab)
 
 	local btn = make("TextButton", {
@@ -702,11 +704,17 @@ end
 
 function SubTab:_relayout()
 	local maxY = 0
+	-- se só uma coluna tem cards, eles ocupam a largura toda (regulariza conforme a quantidade)
+	local used = (#self.columns.Left > 0 and 1 or 0) + (#self.columns.Right > 0 and 1 or 0)
+	local full = self.autoFit and used == 1
 	for col, list in pairs(self.columns) do
 		local y = 0
+		local x = full and 0 or COL_X[col]
+		local w = full and FULL_W or COL_W[col]
 		for _, card in ipairs(list) do
-			card.frame.Position = UDim2.fromOffset(COL_X[col], y)
-			card.frame.Size = UDim2.fromOffset(COL_W[col], card.height)
+			card.width = w
+			card.frame.Position = UDim2.fromOffset(x, y)
+			card.frame.Size = UDim2.fromOffset(w, card.height)
 			y = y + card.height + CARD_GAP
 		end
 		maxY = math.max(maxY, y)
@@ -780,7 +788,8 @@ function Card:AddToggle(opts)
 
 	local bg = make("TextButton", {
 		Text = "", AutoButtonColor = false,
-		Position = UDim2.fromOffset(438, top + 38), Size = UDim2.fromOffset(56, 30),
+		AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -32, 0, top + 38),
+		Size = UDim2.fromOffset(56, 30),
 		BackgroundColor3 = state and C.accent or C.off, BorderSizePixel = 0,
 	}, self.frame)
 	corner(bg, 15)
@@ -812,7 +821,8 @@ function Card:AddToggle(opts)
 		local listening = false
 		local kb = make("TextButton", {
 			Text = key and key.Name or "None", AutoButtonColor = false,
-			Position = UDim2.fromOffset(355, top + 36), Size = UDim2.fromOffset(67, 36),
+			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -104, 0, top + 36),
+			Size = UDim2.fromOffset(67, 36),
 			BackgroundColor3 = C.key, BorderSizePixel = 0,
 			TextColor3 = C.text, TextSize = 20, FontFace = R.fontR,
 		}, self.frame)
@@ -865,7 +875,7 @@ function Card:AddSlider(opts)
 	local el = {}
 
 	local track = make("Frame", {
-		Position = UDim2.fromOffset(32, top + 87), Size = UDim2.fromOffset(462, 4),
+		Position = UDim2.fromOffset(32, top + 87), Size = UDim2.new(1, -64, 0, 4),
 		BackgroundColor3 = C.off, BorderSizePixel = 0,
 	}, self.frame)
 	corner(track, 2)
@@ -879,11 +889,13 @@ function Card:AddSlider(opts)
 		BorderSizePixel = 0, ZIndex = 2,
 	}, track)
 	corner(knob, 12)
-	local valueLabel = label(self.frame, tostring(value), 394, top + 9, 100, 30, 22,
+	local valueLabel = label(self.frame, tostring(value), 0, 0, 100, 30, 22,
 		C.sub, false, Enum.TextXAlignment.Right)
+	valueLabel.AnchorPoint = Vector2.new(1, 0)
+	valueLabel.Position = UDim2.new(1, -32, 0, top + 9)
 	local hit = make("TextButton", {
 		Text = "", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(32, top + 75), Size = UDim2.fromOffset(462, 28),
+		Position = UDim2.fromOffset(32, top + 75), Size = UDim2.new(1, -64, 0, 28),
 	}, self.frame)
 
 	function el:Set(v, silent)
@@ -948,7 +960,7 @@ function Card:AddProgress(opts)
 	local el = {}
 
 	local track = make("Frame", {
-		Position = UDim2.fromOffset(32, top + 85), Size = UDim2.fromOffset(462, 10),
+		Position = UDim2.fromOffset(32, top + 85), Size = UDim2.new(1, -64, 0, 10),
 		BackgroundColor3 = C.off, BorderSizePixel = 0, ClipsDescendants = true,
 	}, self.frame)
 	corner(track, 5)
@@ -959,8 +971,10 @@ function Card:AddProgress(opts)
 	make("UIGradient", {
 		Color = ColorSequence.new(Color3.fromRGB(150, 76, 36), Color3.fromRGB(232, 140, 78)),
 	}, fill)
-	local valueLabel = label(self.frame, "", 394, top + 9, 100, 30, 22, C.sub,
+	local valueLabel = label(self.frame, "", 0, 0, 100, 30, 22, C.sub,
 		false, Enum.TextXAlignment.Right)
+	valueLabel.AnchorPoint = Vector2.new(1, 0)
+	valueLabel.Position = UDim2.new(1, -32, 0, top + 9)
 
 	local function alphaOf(v)
 		return (max == min) and 0 or (v - min) / (max - min)
@@ -1013,24 +1027,45 @@ end
 
 ----------------------------------------------------------------
 -- Button  { Name, Description, ButtonText, Callback }
+-- Botão de largura total do card (acompanha o tamanho do card), na cor dos toggles.
+--   só Name                      -> botão com o texto = Name
+--   Description e/ou ButtonText  -> título + descrição e, abaixo, o botão
 ----------------------------------------------------------------
 function Card:AddButton(opts)
 	opts = opts or {}
 	local C = Autumn.Theme
-	local top = self:_row(opts, 87)
+	local BTN_H = 56
+	local labelled = (opts.Description ~= nil) or (opts.ButtonText ~= nil)
+	local top, btnY
+
+	if labelled then
+		top = self:_row(opts, 146)  -- título + descrição
+		btnY = top + 80
+	else
+		top = self.y
+		btnY = top + 2
+		self:_advance(BTN_H + 10)
+	end
+
 	local btn = make("TextButton", {
-		Text = opts.ButtonText or "Run", AutoButtonColor = false,
-		Position = UDim2.fromOffset(384, top + 36), Size = UDim2.fromOffset(110, 36),
-		BackgroundColor3 = C.key, BorderSizePixel = 0,
-		TextColor3 = C.text, TextSize = 20, FontFace = R.fontR,
+		Text = opts.ButtonText or opts.Name or "Button", AutoButtonColor = false,
+		Position = UDim2.fromOffset(32, btnY), Size = UDim2.new(1, -64, 0, BTN_H),
+		BackgroundColor3 = C.off, BorderSizePixel = 0,
+		TextColor3 = C.text, TextSize = 25, FontFace = R.fontB,
 	}, self.frame)
-	corner(btn, 6)
-	stroke(btn, C.stroke, 1, 0.2)
+	corner(btn, 10)
+	stroke(btn, C.stroke, 1, 0.4)
+
+	local hover = Color3.fromRGB(72, 66, 60)
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = hover }):Play()
+	end)
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.15), { BackgroundColor3 = C.off }):Play()
+	end)
 	btn.MouseButton1Click:Connect(function()
-		TweenService:Create(btn, TweenInfo.new(0.08), { BackgroundColor3 = C.accent }):Play()
-		task.delay(0.12, function()
-			TweenService:Create(btn, TweenInfo.new(0.2), { BackgroundColor3 = C.key }):Play()
-		end)
+		btn.BackgroundColor3 = C.accent -- "clique" laranja e volta para a cor dos toggles
+		TweenService:Create(btn, TweenInfo.new(0.25), { BackgroundColor3 = C.off }):Play()
 		fire(opts.Callback)
 	end)
 	return { Button = btn }
