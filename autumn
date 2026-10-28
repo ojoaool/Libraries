@@ -1,0 +1,906 @@
+--[[
+	Autumn UI Library  -  hospedável no GitHub
+
+	Uso (de qualquer script):
+		local Autumn = loadstring(game:HttpGet("https://raw.githubusercontent.com/<usuario>/<repo>/main/Autumn.lua"))()
+
+	Também funciona como ModuleScript (require) e no Roblox Studio:
+	se não houver writefile/getcustomasset, usa cores sólidas, emojis e a fonte ComicNeue.
+
+	Hierarquia:
+		Window
+		 └─ Tab        (barra de BAIXO - principais)
+		     └─ SubTab (barra de CIMA - mudam conforme a Tab ativa)
+		         └─ Card
+		             └─ Toggle / Slider / Button
+
+	Veja Example.lua e README.md.
+]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
+----------------------------------------------------------------
+-- Configuração (pode ser alterada antes de CreateWindow)
+----------------------------------------------------------------
+local Autumn = {
+	Version = "1.55",
+	Folder = "Autumn", -- pasta de cache (workspace do executor)
+	AssetsUrl = "https://raw.githubusercontent.com/ojoaool/wood-assets/main/", -- fundo e fontes (raiz do repo)
+	-- Ícones podem vir de OUTRO repositório/site (só PNG):
+	-- Pasta dos ícones no repo (espaços viram %20). nil = usa a raiz (AssetsUrl).
+	IconsUrl = "https://raw.githubusercontent.com/ojoaool/wood-assets/main/new%20icons/",
+	IconPrefix = "",   -- Icon = "speed" -> "<IconsUrl>speed.png" (use "nova_" se os arquivos tiverem esse prefixo)
+	IconUrls = {},     -- links diretos por ícone: Autumn.IconUrls.speed = "https://.../speed.png"
+	Flags = {},        -- Flags[nome] = valor atual de cada toggle/slider
+	Windows = {},
+}
+
+Autumn.Theme = {
+	window  = Color3.fromRGB(30, 26, 23),
+	card    = Color3.fromRGB(41, 36, 32),
+	stroke  = Color3.fromRGB(60, 54, 49),
+	text    = Color3.fromRGB(246, 241, 235),
+	sub     = Color3.fromRGB(120, 112, 104),
+	accent  = Color3.fromRGB(201, 108, 52),
+	off     = Color3.fromRGB(58, 53, 49),
+	knobOff = Color3.fromRGB(142, 135, 127),
+	knobOn  = Color3.fromRGB(30, 22, 18),
+	key     = Color3.fromRGB(34, 30, 27),
+	dark    = Color3.fromRGB(38, 20, 8),
+	pill    = Color3.fromRGB(36, 32, 29),
+}
+
+Autumn.Style = {
+	Background = "nova_bg.png",
+	FontRegular = "nova_ComicSansRegular.ttf",
+	FontBold = "nova_ComicSansBold.ttf",
+	WindowImageTransparency = 0,
+	CardImageTransparency = 0.35,
+	CardImageTint = Color3.fromRGB(255, 255, 255),
+}
+
+-- Ícones: o nome "speed" vira o arquivo "nova_speed.png" em AssetsUrl.
+-- Também aceita "arquivo.png" ou "rbxassetid://123". Se falhar, usa o emoji.
+Autumn.IconEmoji = {
+	leaf = "🍁", main = "⌂", parry = "◈", farm = "ϟ", misc = "▣", settings = "⚙",
+	speed = "➤", flight = "✈", protection = "✥", utility = "⚙", player = "👤",
+	test = "🧪", info = "ℹ", demo = "▶", debug = "✎",
+}
+
+----------------------------------------------------------------
+-- Utilitários de ambiente (HTTP / arquivos)
+----------------------------------------------------------------
+local function httpGet(url)
+	local ok, res = pcall(function() return game:HttpGet(url) end)
+	if ok and type(res) == "string" then return res end
+	local req = http_request or request or (syn and syn.request)
+	if req then
+		local ok2, r = pcall(req, { Url = url, Method = "GET" })
+		if ok2 and type(r) == "table" and r.Body then return r.Body end
+	end
+	return nil
+end
+
+local function validBody(body, kind)
+	if type(body) ~= "string" or #body < 64 then return false end
+	if kind == "png" then return body:sub(2, 4) == "PNG" end
+	return body:sub(1, 3) ~= "404" and not body:find("<!DOCTYPE", 1, true)
+end
+
+local warned = {}
+local function warnOnce(msg)
+	if not warned[msg] then
+		warned[msg] = true
+		warn("[Autumn] " .. msg)
+	end
+end
+
+-- baixa (uma vez) um arquivo e devolve o caminho local
+-- file = nome do arquivo no cache | url = endereço (padrão: AssetsUrl .. file)
+local function fetchFile(file, kind, url)
+	if not (writefile and getcustomasset) then return nil end
+	local ok, res = pcall(function()
+		local folder = Autumn.Folder
+		if makefolder and isfolder and not isfolder(folder) then makefolder(folder) end
+		local path = folder .. "/" .. file
+		if not (isfile and isfile(path)) then
+			local body = httpGet(url or (Autumn.AssetsUrl .. file))
+			if not validBody(body, kind) then error("arquivo inválido ou inexistente: " .. file) end
+			writefile(path, body)
+		end
+		return path
+	end)
+	if ok then return res end
+	warnOnce(tostring(res))
+	return nil
+end
+
+local function loadFont(file, family)
+	local path = fetchFile(file, "font")
+	if not path then return nil end
+	local ok, font = pcall(function()
+		local jsonPath = Autumn.Folder .. "/" .. family .. ".json"
+		writefile(jsonPath, HttpService:JSONEncode({
+			name = family,
+			faces = { {
+				name = "Regular", weight = 400, style = "normal",
+				assetId = getcustomasset(path),
+			} },
+		}))
+		return Font.new(getcustomasset(jsonPath), Enum.FontWeight.Regular, Enum.FontStyle.Normal)
+	end)
+	if ok then return font end
+	warnOnce("não foi possível carregar a fonte " .. file)
+	return nil
+end
+
+----------------------------------------------------------------
+-- Recursos (carregados uma vez)
+----------------------------------------------------------------
+local R -- { bg, fontR, fontB }
+
+local function init()
+	if R then return R end
+	R = {}
+	local bgPath = fetchFile(Autumn.Style.Background, "png")
+	if bgPath then
+		local ok, asset = pcall(getcustomasset, bgPath)
+		if ok then R.bg = asset end
+	end
+	R.fontR = loadFont(Autumn.Style.FontRegular, "AutumnComicRegular")
+		or Font.new("rbxasset://fonts/families/ComicNeue.json", Enum.FontWeight.Regular)
+	R.fontB = loadFont(Autumn.Style.FontBold, "AutumnComicBold")
+		or Font.new("rbxasset://fonts/families/ComicNeue.json", Enum.FontWeight.Bold)
+	return R
+end
+
+local iconCache = {}
+local function iconAsset(name)
+	if not name or name == "" then return nil end
+	if iconCache[name] ~= nil then return iconCache[name] or nil end
+	local asset = false
+
+	if name:find("^rbxasset") then
+		asset = name -- asset do próprio Roblox
+	else
+		local file, url
+		local direct = Autumn.IconUrls[name]
+		if direct or name:find("^https?://") then
+			-- link direto (qualquer site/repositório)
+			url = direct or name
+			file = "icon_" .. (url:gsub("[^%w]", "_")):sub(-100) .. ".png"
+		else
+			-- nome simples ("speed") ou arquivo ("speed.png") em IconsUrl
+			local base = Autumn.IconsUrl or Autumn.AssetsUrl
+			file = name:find("%.png$") and name or (Autumn.IconPrefix .. name:lower() .. ".png")
+			url = base .. file
+		end
+		local path = fetchFile(file, "png", url)
+		if path then
+			local ok, a = pcall(getcustomasset, path)
+			if ok then asset = a end
+		end
+	end
+
+	iconCache[name] = asset
+	return asset or nil
+end
+
+----------------------------------------------------------------
+-- Helpers de UI
+----------------------------------------------------------------
+local function make(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do o[k] = v end
+	o.Parent = parent
+	return o
+end
+
+local function corner(o, r)
+	return make("UICorner", { CornerRadius = UDim.new(0, r) }, o)
+end
+
+local function stroke(o, col, thick, transp)
+	return make("UIStroke", {
+		Color = col, Thickness = thick or 1, Transparency = transp or 0,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	}, o)
+end
+
+local function label(parent, str, x, y, w, h, size, color, bold, align)
+	return make("TextLabel", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(x, y),
+		Size = UDim2.fromOffset(w, h),
+		Text = str,
+		TextSize = size,
+		TextColor3 = color,
+		FontFace = bold and R.fontB or R.fontR,
+		TextXAlignment = align or Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+	}, parent)
+end
+
+-- ícone (imagem do GitHub ou emoji). tint=true pinta com `color`.
+local function makeIcon(parent, name, x, y, w, h, color, tint)
+	local asset = iconAsset(name)
+	local obj, setColor
+	if asset then
+		obj = make("ImageLabel", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(x, y),
+			Size = UDim2.fromOffset(w, h),
+			Image = asset,
+			ImageColor3 = tint and color or Color3.new(1, 1, 1),
+			ScaleType = Enum.ScaleType.Fit,
+		}, parent)
+		setColor = function(c) if tint then obj.ImageColor3 = c end end
+	else
+		obj = label(parent, Autumn.IconEmoji[name] or "•", x, y, w, h,
+			math.floor(h * 0.8), color, false, Enum.TextXAlignment.Center)
+		setColor = function(c) obj.TextColor3 = c end
+	end
+	return { obj = obj, SetColor = setColor }
+end
+
+local function getGuiParent()
+	local ok, hui = pcall(function() return gethui and gethui() end)
+	if ok and hui then return hui end
+	return Players.LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local function fire(cb, ...)
+	if cb then task.spawn(cb, ...) end
+end
+
+local function imageBackground(parent, radius, transparency, tint, zindex)
+	if not R.bg then return nil end
+	local img = make("ImageLabel", {
+		Name = "Background",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Image = R.bg,
+		ImageColor3 = tint or Color3.new(1, 1, 1),
+		ImageTransparency = transparency,
+		ScaleType = Enum.ScaleType.Crop,
+		ZIndex = zindex or 1,
+	}, parent)
+	corner(img, radius)
+	return img
+end
+
+----------------------------------------------------------------
+-- Classes
+----------------------------------------------------------------
+local Window, Tab, SubTab, Card = {}, {}, {}, {}
+Window.__index, Tab.__index, SubTab.__index, Card.__index = Window, Tab, SubTab, Card
+
+local DESIGN_W, DESIGN_H = 1120, 864
+local COL_X = { Left = 0, Right = 547 }
+local COL_W = { Left = 526, Right = 525 }
+local CARD_GAP = 20
+
+----------------------------------------------------------------
+-- Window
+----------------------------------------------------------------
+function Autumn:CreateWindow(opts)
+	opts = opts or {}
+	init()
+	local C, S = Autumn.Theme, Autumn.Style
+
+	local parent = getGuiParent()
+	local guiName = opts.GuiName or "AutumnUI"
+	local old = parent:FindFirstChild(guiName)
+	if old then old:Destroy() end
+
+	local gui = make("ScreenGui", {
+		Name = guiName, ResetOnSpawn = false, IgnoreGuiInset = true,
+		DisplayOrder = opts.DisplayOrder or 100,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	}, parent)
+
+	-- escala automática (cabe em telas pequenas/celular)
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+	local scale = math.min(opts.Scale or 0.6, vp.X * 0.95 / DESIGN_W, vp.Y * 0.95 / DESIGN_H)
+
+	local frame = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(DESIGN_W * scale, DESIGN_H * scale),
+		BackgroundColor3 = C.window,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+	}, gui)
+	corner(frame, 16)
+	stroke(frame, C.stroke, 1, 0.3)
+
+	local bg = imageBackground(frame, 16, S.WindowImageTransparency, nil, 0)
+	if bg then bg.ZIndex = 0 end
+
+	local root = make("Frame", {
+		Size = UDim2.fromOffset(DESIGN_W, DESIGN_H),
+		BackgroundTransparency = 1,
+	}, frame)
+	make("UIScale", { Scale = scale }, root)
+
+	local self = setmetatable({
+		gui = gui, frame = frame, root = root, scale = scale,
+		tabs = {}, activeTab = nil, _conns = {},
+		OnTabChanged = opts.OnTabChanged,
+		OnSubTabChanged = opts.OnSubTabChanged,
+	}, Window)
+
+	-- cabeçalho: logo + nome + versão
+	makeIcon(root, opts.Logo or "leaf", 24, 18, 40, 40, C.accent, false)
+	local titleHolder = make("Frame", {
+		Position = UDim2.fromOffset(70, 18), Size = UDim2.fromOffset(500, 40),
+		BackgroundTransparency = 1,
+	}, root)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 14),
+	}, titleHolder)
+	local title = label(titleHolder, opts.Name or "Autumn", 0, 0, 0, 40, 31, C.text, true)
+	title.Size = UDim2.fromOffset(0, 40)
+	title.AutomaticSize = Enum.AutomaticSize.X
+	title.LayoutOrder = 1
+	local ver = label(titleHolder, opts.Version or ("v" .. Autumn.Version), 0, 0, 0, 40, 21, C.sub, false)
+	ver.Size = UDim2.fromOffset(0, 40)
+	ver.AutomaticSize = Enum.AutomaticSize.X
+	ver.LayoutOrder = 2
+	self.titleLabel, self.versionLabel = title, ver
+
+	-- arrastar pela área do cabeçalho
+	do
+		local drag = make("Frame", {
+			Size = UDim2.fromOffset(DESIGN_W, 70), BackgroundTransparency = 1,
+		}, root)
+		local dragging, startPos, startInput
+		drag.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1
+				or i.UserInputType == Enum.UserInputType.Touch then
+				dragging, startPos, startInput = true, frame.Position, i.Position
+			end
+		end)
+		self:_connect(UserInputService.InputChanged, function(i)
+			if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+				or i.UserInputType == Enum.UserInputType.Touch) then
+				local d = i.Position - startInput
+				frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+					startPos.Y.Scale, startPos.Y.Offset + d.Y)
+			end
+		end)
+		self:_connect(UserInputService.InputEnded, function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1
+				or i.UserInputType == Enum.UserInputType.Touch then
+				dragging = false
+			end
+		end)
+	end
+
+	-- divisória entre subtabs e conteúdo
+	local fade = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.04, 0),
+		NumberSequenceKeypoint.new(0.96, 0),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	local shadow = make("Frame", {
+		Name = "DividerShadow", Position = UDim2.fromOffset(23, 138),
+		Size = UDim2.fromOffset(1073, 1), BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.6, BorderSizePixel = 0, ZIndex = 2,
+	}, root)
+	make("UIGradient", { Transparency = fade }, shadow)
+	local divider = make("Frame", {
+		Name = "Divider", Position = UDim2.fromOffset(23, 137),
+		Size = UDim2.fromOffset(1073, 1), BackgroundColor3 = Color3.fromRGB(66, 58, 52),
+		BackgroundTransparency = 0.25, BorderSizePixel = 0, ZIndex = 2,
+	}, root)
+	make("UIGradient", { Transparency = fade }, divider)
+
+	-- barra de tabs de baixo
+	self.pillHolder = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromOffset(548, 777),
+		Size = UDim2.fromOffset(0, 56), AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1, ZIndex = 10,
+	}, root)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 12),
+	}, self.pillHolder)
+
+	-- tecla para esconder/mostrar
+	local toggleKey = opts.ToggleKey
+	if toggleKey == nil then toggleKey = Enum.KeyCode.RightShift end
+	if toggleKey then
+		self:_connect(UserInputService.InputBegan, function(i, gp)
+			if not gp and i.KeyCode == toggleKey then self:Toggle() end
+		end)
+	end
+
+	table.insert(Autumn.Windows, self)
+	return self
+end
+
+function Window:_connect(signal, fn)
+	local c = signal:Connect(fn)
+	table.insert(self._conns, c)
+	return c
+end
+
+function Window:Toggle(state)
+	if state == nil then state = not self.gui.Enabled end
+	self.gui.Enabled = state
+end
+
+function Window:Destroy()
+	for _, c in ipairs(self._conns) do c:Disconnect() end
+	self._conns = {}
+	self.gui:Destroy()
+	for i, w in ipairs(Autumn.Windows) do
+		if w == self then table.remove(Autumn.Windows, i) break end
+	end
+end
+
+function Window:SetTitle(name, version)
+	if name then self.titleLabel.Text = name end
+	if version then self.versionLabel.Text = version end
+end
+
+function Window:SelectTab(tab, silent)
+	if type(tab) == "string" then
+		for _, t in ipairs(self.tabs) do
+			if t.name == tab then tab = t break end
+		end
+	end
+	if type(tab) ~= "table" then return end
+	local C = Autumn.Theme
+	self.activeTab = tab
+	for _, t in ipairs(self.tabs) do
+		t.active = (t == tab)
+		t.holder.Visible = t.active -- troca as subtabs de cima
+		for _, sub in ipairs(t.subList) do
+			sub.page.Visible = t.active and sub == t.current
+		end
+		t.pillStroke.Color = t.active and C.accent or C.stroke
+		t.pillStroke.Transparency = t.active and 0.35 or 0.1
+		t.pillText.TextColor3 = t.active and C.text or C.sub
+		t.pillIcon.SetColor(t.active and C.text or C.sub)
+	end
+	if not silent then fire(self.OnTabChanged, tab.name) end
+end
+
+----------------------------------------------------------------
+-- Tab (barra de baixo)
+----------------------------------------------------------------
+function Window:AddTab(opts)
+	opts = opts or {}
+	local C, S = Autumn.Theme, Autumn.Style
+	local tab = setmetatable({
+		window = self, name = opts.Name or "Tab", icon = opts.Icon,
+		subList = {}, current = nil, active = false,
+	}, Tab)
+
+	-- container das subtabs (cima) desta tab
+	tab.holder = make("Frame", {
+		Position = UDim2.fromOffset(23, 80), Size = UDim2.fromOffset(1073, 43),
+		BackgroundTransparency = 1, Visible = false,
+	}, self.root)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 14),
+	}, tab.holder)
+
+	-- botão da tab (embaixo)
+	local pill = make("TextButton", {
+		Text = "", AutoButtonColor = false,
+		Size = UDim2.fromOffset(205, 56),
+		BackgroundColor3 = C.pill, BorderSizePixel = 0,
+		ZIndex = 10, LayoutOrder = #self.tabs + 1,
+	}, self.pillHolder)
+	corner(pill, 16)
+	tab.pillStroke = stroke(pill, C.stroke, 1, 0.1)
+	local img = imageBackground(pill, 16, S.CardImageTransparency, S.CardImageTint, 10)
+
+	local group = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(0, 56), AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1, ZIndex = 11,
+	}, pill)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 10),
+	}, group)
+
+	local hasIcon = opts.Icon ~= nil and opts.Icon ~= false
+	tab.pillIcon = makeIcon(group, opts.Icon or "player", 0, 0, 30, 30, C.text, true)
+	tab.pillIcon.obj.ZIndex = 11
+	tab.pillIcon.obj.LayoutOrder = 1
+	tab.pillIcon.obj.Visible = hasIcon
+
+	tab.pillText = make("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(0, 56), AutomaticSize = Enum.AutomaticSize.X,
+		Text = tab.name, TextSize = 25, TextColor3 = C.text, FontFace = R.fontB,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		LayoutOrder = 2, ZIndex = 11,
+	}, group)
+
+	-- a box acompanha o conteúdo e fica centralizada (AbsoluteSize inclui o UIScale)
+	local function layoutPill()
+		local w = math.ceil(group.AbsoluteSize.X / self.scale)
+		if w > 0 then pill.Size = UDim2.fromOffset(w + 56, 56) end
+	end
+	group:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutPill)
+	layoutPill()
+	pill.MouseButton1Click:Connect(function() self:SelectTab(tab) end)
+
+	table.insert(self.tabs, tab)
+	if not self.activeTab then
+		self:SelectTab(tab)
+	else
+		self:SelectTab(self.activeTab, true) -- reaplica estilo (nova tab fica inativa)
+	end
+	return tab
+end
+
+function Tab:SetName(name)
+	self.name = name
+	self.pillText.Text = name
+end
+
+----------------------------------------------------------------
+-- SubTab (barra de cima)
+----------------------------------------------------------------
+local function showSub(tab, sub)
+	local C = Autumn.Theme
+	tab.current = sub
+	for _, s in ipairs(tab.subList) do
+		local active = (s == sub)
+		TweenService:Create(s.btn, TweenInfo.new(0.2), {
+			BackgroundTransparency = active and 0 or 1,
+		}):Play()
+		s.icon.SetColor(active and C.dark or C.sub)
+		s.text.TextColor3 = active and C.dark or C.sub
+		s.glow.Enabled = active
+		s.page.Visible = tab.active and active
+	end
+end
+
+function Tab:AddSubTab(opts)
+	opts = opts or {}
+	local C = Autumn.Theme
+	local name = opts.Name or "SubTab"
+	local sub = setmetatable({
+		tab = self, name = name, cards = {}, columns = { Left = {}, Right = {} },
+	}, SubTab)
+
+	local btn = make("TextButton", {
+		Text = "", AutoButtonColor = false,
+		Size = UDim2.fromOffset(0, 43), AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = C.accent, BackgroundTransparency = 1, BorderSizePixel = 0,
+		LayoutOrder = #self.subList + 1,
+	}, self.holder)
+	corner(btn, 10)
+	sub.glow = stroke(btn, C.accent, 3, 0.65)
+	sub.glow.Enabled = false
+	-- o fundo laranja sempre acompanha o tamanho do nome
+	make("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 18) }, btn)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 8),
+	}, btn)
+
+	sub.icon = makeIcon(btn, opts.Icon or name:lower(), 0, 0, 26, 26, C.sub, true)
+	sub.icon.obj.LayoutOrder = 1
+	if opts.Icon == false then sub.icon.obj.Visible = false end
+	sub.text = label(btn, name, 0, 0, 0, 43, 28, C.sub, true)
+	sub.text.Size = UDim2.fromOffset(0, 43)
+	sub.text.AutomaticSize = Enum.AutomaticSize.X
+	sub.text.LayoutOrder = 2
+	sub.btn = btn
+
+	sub.page = make("ScrollingFrame", {
+		Position = UDim2.fromOffset(23, 160), Size = UDim2.fromOffset(1073, 685),
+		BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 0,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		CanvasSize = UDim2.fromOffset(0, 0), Visible = false,
+	}, self.window.root)
+
+	table.insert(self.subList, sub)
+	btn.MouseButton1Click:Connect(function()
+		showSub(self, sub)
+		fire(self.window.OnSubTabChanged, self.name, name)
+	end)
+
+	if not self.current then showSub(self, sub) end
+	return sub
+end
+
+function SubTab:_colHeight(col)
+	local h = 0
+	for _, c in ipairs(self.columns[col]) do h = h + c.height + CARD_GAP end
+	return h
+end
+
+function SubTab:_relayout()
+	local maxY = 0
+	for col, list in pairs(self.columns) do
+		local y = 0
+		for _, card in ipairs(list) do
+			card.frame.Position = UDim2.fromOffset(COL_X[col], y)
+			card.frame.Size = UDim2.fromOffset(COL_W[col], card.height)
+			y = y + card.height + CARD_GAP
+		end
+		maxY = math.max(maxY, y)
+	end
+	self.page.CanvasSize = UDim2.fromOffset(0, maxY + 10)
+end
+
+----------------------------------------------------------------
+-- Card
+----------------------------------------------------------------
+function SubTab:AddCard(opts)
+	opts = opts or {}
+	local C, S = Autumn.Theme, Autumn.Style
+	local col = opts.Column
+	if col ~= "Left" and col ~= "Right" then
+		col = (self:_colHeight("Left") <= self:_colHeight("Right")) and "Left" or "Right"
+	end
+
+	local card = setmetatable({
+		sub = self, window = self.tab.window, column = col,
+		y = 60,       -- topo da próxima linha (abaixo do cabeçalho)
+		height = 74,
+	}, Card)
+
+	card.frame = make("Frame", {
+		Size = UDim2.fromOffset(COL_W[col], 74),
+		BackgroundColor3 = C.card, BorderSizePixel = 0,
+	}, self.page)
+	corner(card.frame, 18)
+	stroke(card.frame, C.stroke, 1, 0.5)
+	if R.bg then
+		card.frame.BackgroundTransparency = 0.25 -- cor sólida por baixo da imagem
+		imageBackground(card.frame, 18, S.CardImageTransparency, S.CardImageTint, 1)
+	end
+	makeIcon(card.frame, opts.Icon or "settings", 26, 25, 26, 26, C.sub, true)
+	label(card.frame, string.upper(opts.Name or "CARD"), 54, 23, 300, 30, 22, C.sub, true)
+
+	table.insert(self.columns[col], card)
+	table.insert(self.cards, card)
+	self:_relayout()
+	return card
+end
+
+function Card:_advance(h)
+	self.y = self.y + h
+	self.height = self.y + 14
+	self.sub:_relayout()
+end
+
+-- cria título + descrição e devolve o topo da linha
+function Card:_row(opts, h)
+	local C = Autumn.Theme
+	local top = self.y
+	label(self.frame, opts.Name or "", 32, top + 11, 330, 36, 28, C.text, true)
+	label(self.frame, opts.Description or "", 32, top + 43, 400, 28, 20, C.sub, false)
+	self:_advance(h)
+	return top
+end
+
+----------------------------------------------------------------
+-- Toggle  { Name, Description, Default, Keybind, Flag, Callback, KeyCallback }
+----------------------------------------------------------------
+function Card:AddToggle(opts)
+	opts = opts or {}
+	local C = Autumn.Theme
+	local window = self.window
+	local top = self:_row(opts, 87)
+	local flag = opts.Flag or opts.Name
+	local state = opts.Default and true or false
+	local el = {}
+
+	local bg = make("TextButton", {
+		Text = "", AutoButtonColor = false,
+		Position = UDim2.fromOffset(438, top + 38), Size = UDim2.fromOffset(56, 30),
+		BackgroundColor3 = state and C.accent or C.off, BorderSizePixel = 0,
+	}, self.frame)
+	corner(bg, 15)
+	local knob = make("Frame", {
+		Position = UDim2.fromOffset(state and 31 or 5, 5), Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = state and C.knobOn or C.knobOff, BorderSizePixel = 0,
+	}, bg)
+	corner(knob, 10)
+
+	function el:Set(v, silent)
+		state = v and true or false
+		Autumn.Flags[flag] = state
+		local ti = TweenInfo.new(0.18, Enum.EasingStyle.Quad)
+		TweenService:Create(bg, ti, { BackgroundColor3 = state and C.accent or C.off }):Play()
+		TweenService:Create(knob, ti, {
+			Position = UDim2.fromOffset(state and 31 or 5, 5),
+			BackgroundColor3 = state and C.knobOn or C.knobOff,
+		}):Play()
+		if not silent then fire(opts.Callback, state) end
+	end
+	function el:Get() return state end
+
+	bg.MouseButton1Click:Connect(function() el:Set(not state) end)
+	Autumn.Flags[flag] = state
+
+	-- keybind opcional (a tecla liga/desliga o toggle)
+	if opts.Keybind then
+		local key = typeof(opts.Keybind) == "EnumItem" and opts.Keybind or nil
+		local listening = false
+		local kb = make("TextButton", {
+			Text = key and key.Name or "None", AutoButtonColor = false,
+			Position = UDim2.fromOffset(355, top + 36), Size = UDim2.fromOffset(67, 36),
+			BackgroundColor3 = C.key, BorderSizePixel = 0,
+			TextColor3 = C.text, TextSize = 20, FontFace = R.fontR,
+		}, self.frame)
+		corner(kb, 6)
+		stroke(kb, C.stroke, 1, 0.2)
+		Autumn.Flags[flag .. "_Key"] = key
+
+		function el:SetKey(k)
+			key = k
+			kb.Text = key and key.Name or "None"
+			Autumn.Flags[flag .. "_Key"] = key
+			fire(opts.KeyCallback, key)
+		end
+		function el:GetKey() return key end
+
+		kb.MouseButton1Click:Connect(function()
+			if listening then return end
+			listening = true
+			kb.Text = "..."
+			local conn
+			conn = UserInputService.InputBegan:Connect(function(i)
+				if i.UserInputType == Enum.UserInputType.Keyboard then
+					conn:Disconnect()
+					task.defer(function() listening = false end)
+					el:SetKey(i.KeyCode ~= Enum.KeyCode.Escape and i.KeyCode or nil)
+				end
+			end)
+		end)
+		window:_connect(UserInputService.InputBegan, function(i, gp)
+			if not gp and not listening and key and i.KeyCode == key then
+				el:Set(not state)
+			end
+		end)
+	end
+
+	return el
+end
+
+----------------------------------------------------------------
+-- Slider  { Name, Description, Min, Max, Default, Flag, Callback }
+----------------------------------------------------------------
+function Card:AddSlider(opts)
+	opts = opts or {}
+	local C = Autumn.Theme
+	local window = self.window
+	local top = self:_row(opts, 118)
+	local flag = opts.Flag or opts.Name
+	local min, max = opts.Min or 0, opts.Max or 100
+	local value = math.clamp(opts.Default or min, min, max)
+	local el = {}
+
+	local track = make("Frame", {
+		Position = UDim2.fromOffset(32, top + 87), Size = UDim2.fromOffset(462, 4),
+		BackgroundColor3 = C.off, BorderSizePixel = 0,
+	}, self.frame)
+	corner(track, 2)
+	local fill = make("Frame", {
+		Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.accent, BorderSizePixel = 0,
+	}, track)
+	corner(fill, 2)
+	local knob = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0, 0.5),
+		Size = UDim2.fromOffset(24, 24), BackgroundColor3 = C.text,
+		BorderSizePixel = 0, ZIndex = 2,
+	}, track)
+	corner(knob, 12)
+	local valueLabel = label(self.frame, tostring(value), 394, top + 9, 100, 30, 22,
+		C.sub, false, Enum.TextXAlignment.Right)
+	local hit = make("TextButton", {
+		Text = "", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(32, top + 75), Size = UDim2.fromOffset(462, 28),
+	}, self.frame)
+
+	function el:Set(v, silent)
+		v = math.clamp(math.floor(v + 0.5), min, max)
+		value = v
+		local a = (max == min) and 0 or (v - min) / (max - min)
+		fill.Size = UDim2.fromScale(a, 1)
+		knob.Position = UDim2.fromScale(a, 0.5)
+		valueLabel.Text = tostring(v)
+		Autumn.Flags[flag] = v
+		if not silent then fire(opts.Callback, v) end
+	end
+	function el:Get() return value end
+
+	local function fromX(x)
+		local a = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+		local v = math.floor(min + a * (max - min) + 0.5)
+		if v ~= value then el:Set(v) end
+	end
+
+	local dragging = false
+	hit.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1
+			or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			fromX(i.Position.X)
+		end
+	end)
+	window:_connect(UserInputService.InputChanged, function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+			or i.UserInputType == Enum.UserInputType.Touch) then
+			fromX(i.Position.X)
+		end
+	end)
+	window:_connect(UserInputService.InputEnded, function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1
+			or i.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+
+	el:Set(value, true)
+	return el
+end
+
+----------------------------------------------------------------
+-- Button  { Name, Description, ButtonText, Callback }
+----------------------------------------------------------------
+function Card:AddButton(opts)
+	opts = opts or {}
+	local C = Autumn.Theme
+	local top = self:_row(opts, 87)
+	local btn = make("TextButton", {
+		Text = opts.ButtonText or "Run", AutoButtonColor = false,
+		Position = UDim2.fromOffset(384, top + 36), Size = UDim2.fromOffset(110, 36),
+		BackgroundColor3 = C.key, BorderSizePixel = 0,
+		TextColor3 = C.text, TextSize = 20, FontFace = R.fontR,
+	}, self.frame)
+	corner(btn, 6)
+	stroke(btn, C.stroke, 1, 0.2)
+	btn.MouseButton1Click:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.08), { BackgroundColor3 = C.accent }):Play()
+		task.delay(0.12, function()
+			TweenService:Create(btn, TweenInfo.new(0.2), { BackgroundColor3 = C.key }):Play()
+		end)
+		fire(opts.Callback)
+	end)
+	return { Button = btn }
+end
+
+----------------------------------------------------------------
+-- Global
+----------------------------------------------------------------
+function Autumn:Unload()
+	for i = #Autumn.Windows, 1, -1 do
+		Autumn.Windows[i]:Destroy()
+	end
+end
+
+return Autumn
