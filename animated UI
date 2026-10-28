@@ -282,6 +282,46 @@ local DESIGN_W, DESIGN_H = 1120, 864
 local COL_X = { Left = 0, Right = 547 }
 local COL_W = { Left = 526, Right = 525 }
 local CARD_GAP = 20
+local PAGE_X, PAGE_Y = 23, 160
+
+-- mostra/esconde uma página com animação (fade + deslize)
+--   dir =  1 / -1 : desliza da direita / esquerda (troca de subtab)
+--   dir =  0      : sobe de baixo para cima (troca de tab)
+local function setPage(sub, visible, animate, dir)
+	if sub._visible == visible then return end
+	sub._visible = visible
+	local g = sub.group
+	if sub._tween then sub._tween:Cancel() sub._tween = nil end
+
+	if visible then
+		g.Visible = true
+		if animate then
+			dir = dir or 0
+			g.GroupTransparency = 1
+			g.Position = UDim2.fromOffset(PAGE_X + dir * 40, PAGE_Y + (dir == 0 and 24 or 0))
+			sub._tween = TweenService:Create(g,
+				TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+				{ GroupTransparency = 0, Position = UDim2.fromOffset(PAGE_X, PAGE_Y) })
+			sub._tween:Play()
+		else
+			g.GroupTransparency = 0
+			g.Position = UDim2.fromOffset(PAGE_X, PAGE_Y)
+		end
+	elseif animate and g.Visible then
+		local tw = TweenService:Create(g,
+			TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ GroupTransparency = 1 })
+		sub._tween = tw
+		tw.Completed:Connect(function(state)
+			if state == Enum.PlaybackState.Completed and not sub._visible then
+				g.Visible = false
+			end
+		end)
+		tw:Play()
+	else
+		g.Visible = false
+	end
+end
 
 ----------------------------------------------------------------
 -- Window
@@ -469,7 +509,7 @@ function Window:SelectTab(tab, silent)
 		t.active = (t == tab)
 		t.holder.Visible = t.active -- troca as subtabs de cima
 		for _, sub in ipairs(t.subList) do
-			sub.page.Visible = t.active and sub == t.current
+			setPage(sub, t.active and sub == t.current, true, 0)
 		end
 		t.pillStroke.Color = t.active and C.accent or C.stroke
 		t.pillStroke.Transparency = t.active and 0.35 or 0.1
@@ -567,9 +607,22 @@ end
 ----------------------------------------------------------------
 -- SubTab (barra de cima)
 ----------------------------------------------------------------
-local function showSub(tab, sub)
+local function showSub(tab, sub, animate)
 	local C = Autumn.Theme
+	local previous = tab.current
 	tab.current = sub
+
+	-- direção da animação conforme a posição da subtab
+	local dir = 1
+	if previous then
+		local pi, ni
+		for i, s in ipairs(tab.subList) do
+			if s == previous then pi = i end
+			if s == sub then ni = i end
+		end
+		if pi and ni and ni < pi then dir = -1 end
+	end
+
 	for _, s in ipairs(tab.subList) do
 		local active = (s == sub)
 		TweenService:Create(s.btn, TweenInfo.new(0.2), {
@@ -578,7 +631,7 @@ local function showSub(tab, sub)
 		s.icon.SetColor(active and C.dark or C.sub)
 		s.text.TextColor3 = active and C.dark or C.sub
 		s.glow.Enabled = active
-		s.page.Visible = tab.active and active
+		setPage(s, tab.active and active, animate, dir)
 	end
 end
 
@@ -617,16 +670,23 @@ function Tab:AddSubTab(opts)
 	sub.text.LayoutOrder = 2
 	sub.btn = btn
 
+	-- o CanvasGroup permite fazer fade da página inteira na troca
+	sub._visible = false
+	sub.group = make("CanvasGroup", {
+		Position = UDim2.fromOffset(PAGE_X, PAGE_Y), Size = UDim2.fromOffset(1073, 685),
+		BackgroundTransparency = 1, BorderSizePixel = 0, Visible = false,
+	}, self.window.root)
 	sub.page = make("ScrollingFrame", {
-		Position = UDim2.fromOffset(23, 160), Size = UDim2.fromOffset(1073, 685),
+		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 0,
 		ScrollingDirection = Enum.ScrollingDirection.Y,
-		CanvasSize = UDim2.fromOffset(0, 0), Visible = false,
-	}, self.window.root)
+		CanvasSize = UDim2.fromOffset(0, 0),
+	}, sub.group)
 
 	table.insert(self.subList, sub)
 	btn.MouseButton1Click:Connect(function()
-		showSub(self, sub)
+		if self.current == sub then return end
+		showSub(self, sub, true)
 		fire(self.window.OnSubTabChanged, self.name, name)
 	end)
 
@@ -866,6 +926,88 @@ function Card:AddSlider(opts)
 	end)
 
 	el:Set(value, true)
+	return el
+end
+
+----------------------------------------------------------------
+-- Progress  { Name, Description, Min, Max, Default, Format, Flag, Callback, OnComplete }
+-- Barra de progresso que vai se enchendo (não é arrastável).
+--   el:Set(valor, instantaneo)   el:Get()   el:Increment(n)
+--   el:FillOver(segundos, aoTerminar)  -> enche sozinha até o máximo
+----------------------------------------------------------------
+function Card:AddProgress(opts)
+	opts = opts or {}
+	local C = Autumn.Theme
+	local top = self:_row(opts, 112)
+	local flag = opts.Flag or opts.Name
+	local min, max = opts.Min or 0, opts.Max or 100
+	local value = math.clamp(opts.Default or min, min, max)
+	local format = opts.Format or function(_, alpha)
+		return math.floor(alpha * 100 + 0.5) .. "%"
+	end
+	local el = {}
+
+	local track = make("Frame", {
+		Position = UDim2.fromOffset(32, top + 85), Size = UDim2.fromOffset(462, 10),
+		BackgroundColor3 = C.off, BorderSizePixel = 0, ClipsDescendants = true,
+	}, self.frame)
+	corner(track, 5)
+	local fill = make("Frame", {
+		Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.accent, BorderSizePixel = 0,
+	}, track)
+	corner(fill, 5)
+	make("UIGradient", {
+		Color = ColorSequence.new(Color3.fromRGB(150, 76, 36), Color3.fromRGB(232, 140, 78)),
+	}, fill)
+	local valueLabel = label(self.frame, "", 394, top + 9, 100, 30, 22, C.sub,
+		false, Enum.TextXAlignment.Right)
+
+	local function alphaOf(v)
+		return (max == min) and 0 or (v - min) / (max - min)
+	end
+
+	function el:Set(v, instant, silent)
+		v = math.clamp(v, min, max)
+		value = v
+		Autumn.Flags[flag] = v
+		local a = alphaOf(v)
+		valueLabel.Text = tostring(format(v, a))
+		if instant then
+			fill.Size = UDim2.fromScale(a, 1)
+		else
+			TweenService:Create(fill, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+				Size = UDim2.fromScale(a, 1),
+			}):Play()
+		end
+		if not silent then
+			fire(opts.Callback, v)
+			if v >= max then fire(opts.OnComplete) end
+		end
+	end
+	function el:Get() return value end
+	function el:Increment(n) el:Set(value + (n or 1)) end
+
+	local run = 0
+	function el:FillOver(seconds, onDone)
+		run = run + 1
+		local mine = run
+		task.spawn(function()
+			local start, t0 = value, os.clock()
+			while mine == run and track.Parent do
+				local a = math.clamp((os.clock() - t0) / math.max(seconds, 0.01), 0, 1)
+				el:Set(start + (max - start) * a, true, true)
+				if a >= 1 then break end
+				task.wait()
+			end
+			if mine == run and track.Parent then
+				fire(opts.Callback, value)
+				fire(opts.OnComplete)
+				fire(onDone)
+			end
+		end)
+	end
+
+	el:Set(value, true, true)
 	return el
 end
 
