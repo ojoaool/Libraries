@@ -158,27 +158,49 @@ local function init()
 end
 
 local iconCache = {}
+
+local function encodeUrl(str)
+	return (str:gsub(" ", "%%20"))
+end
+
+-- aceita links "github.com/usuario/repo/blob/main/arquivo.png" e converte para raw
+local function toRawUrl(url)
+	local user, repo, rest = url:match("^https?://github%.com/([^/]+)/([^/]+)/blob/(.+)$")
+	if user then
+		rest = rest:gsub("%?.*$", "")
+		return "https://raw.githubusercontent.com/" .. user .. "/" .. repo .. "/" .. rest
+	end
+	return encodeUrl(url)
+end
+
+-- Resolve um ícone para um asset do Roblox. Aceita:
+--   "speed"                    -> <IconsUrl><IconPrefix>speed.png
+--   "pasta/arquivo.png"        -> <IconsUrl>pasta/arquivo.png
+--   "https://..." (qualquer)   -> link direto (links github.com/.../blob/ são convertidos)
+--   "rbxassetid://123"         -> asset do Roblox
+--   nomes registrados em Autumn.IconUrls
 local function iconAsset(name)
 	if not name or name == "" then return nil end
 	if iconCache[name] ~= nil then return iconCache[name] or nil end
 	local asset = false
+	local direct = Autumn.IconUrls[name]
 
 	if name:find("^rbxasset") then
-		asset = name -- asset do próprio Roblox
+		asset = name
+	elseif direct and direct:find("^rbxasset") then
+		asset = direct
 	else
-		local file, url
-		local direct = Autumn.IconUrls[name]
+		local url, cache
 		if direct or name:find("^https?://") then
-			-- link direto (qualquer site/repositório)
-			url = direct or name
-			file = "icon_" .. (url:gsub("[^%w]", "_")):sub(-100) .. ".png"
+			url = toRawUrl(direct or name)
+			cache = "icon_" .. (url:gsub("[^%w]", "_")):sub(-100) .. ".png"
 		else
-			-- nome simples ("speed") ou arquivo ("speed.png") em IconsUrl
 			local base = Autumn.IconsUrl or Autumn.AssetsUrl
-			file = name:find("%.png$") and name or (Autumn.IconPrefix .. name:lower() .. ".png")
-			url = base .. file
+			local fileName = name:find("%.png$") and name or (Autumn.IconPrefix .. name:lower() .. ".png")
+			url = base .. encodeUrl(fileName)
+			cache = "icon_" .. (fileName:gsub("[^%w%._%-]", "_"))
 		end
-		local path = fetchFile(file, "png", url)
+		local path = fetchFile(cache, "png", url)
 		if path then
 			local ok, a = pcall(getcustomasset, path)
 			if ok then asset = a end
@@ -187,6 +209,38 @@ local function iconAsset(name)
 
 	iconCache[name] = asset
 	return asset or nil
+end
+
+-- Define de onde vêm os ícones (um repositório/pasta do GitHub).
+--   Autumn:SetIconRepo("ojoaool/wood-assets", "main", "new icons", "")
+function Autumn:SetIconRepo(repo, branch, folder, prefix)
+	local url = "https://raw.githubusercontent.com/" .. repo .. "/" .. (branch or "main") .. "/"
+	if folder and folder ~= "" then
+		folder = folder:gsub("^/+", ""):gsub("/+$", "")
+		url = url .. encodeUrl(folder) .. "/"
+	end
+	Autumn.IconsUrl = url
+	if prefix ~= nil then Autumn.IconPrefix = prefix end
+	iconCache = {}
+end
+
+-- Registra vários ícones de uma vez: nome -> link / arquivo / rbxassetid
+--   Autumn:RegisterIcons({ speed = "https://.../run.png", fly = "plane.png" })
+function Autumn:RegisterIcons(map)
+	for name, src in pairs(map) do
+		Autumn.IconUrls[name] = src
+		iconCache[name] = nil
+	end
+end
+
+-- Baixa os ícones antes de montar a UI (evita travadinhas)
+--   Autumn:PreloadIcons({ "speed", "flight", "https://..." })
+function Autumn:PreloadIcons(list)
+	for _, name in ipairs(list) do iconAsset(name) end
+end
+
+function Autumn:ClearIconCache()
+	iconCache = {}
 end
 
 ----------------------------------------------------------------
@@ -768,8 +822,13 @@ end
 function Card:_row(opts, h)
 	local C = Autumn.Theme
 	local top = self.y
-	label(self.frame, opts.Name or "", 32, top + 11, 330, 36, 28, C.text, true)
-	label(self.frame, opts.Description or "", 32, top + 43, 400, 28, 20, C.sub, false)
+	local tx = 32
+	if opts.Icon then -- ícone opcional à esquerda do título
+		makeIcon(self.frame, opts.Icon, 32, top + 15, 28, 28, C.text, true)
+		tx = 70
+	end
+	label(self.frame, opts.Name or "", tx, top + 11, 330, 36, 28, C.text, true)
+	label(self.frame, opts.Description or "", tx, top + 43, 400, 28, 20, C.sub, false)
 	self:_advance(h)
 	return top
 end
@@ -1033,8 +1092,8 @@ end
 ----------------------------------------------------------------
 function Card:AddButton(opts)
 	opts = opts or {}
-	local C = Autumn.Theme
-	local BTN_H = 56
+	local C, S = Autumn.Theme, Autumn.Style
+	local BTN_H, RADIUS = 56, 20
 	local labelled = (opts.Description ~= nil) or (opts.ButtonText ~= nil)
 	local top, btnY
 
@@ -1047,28 +1106,68 @@ function Card:AddButton(opts)
 		self:_advance(BTN_H + 10)
 	end
 
+	-- ícone dentro do botão: sem descrição -> Icon; com descrição -> ButtonIcon
+	local btnIcon = labelled and opts.ButtonIcon or (opts.Icon or opts.ButtonIcon)
+
 	local btn = make("TextButton", {
-		Text = opts.ButtonText or opts.Name or "Button", AutoButtonColor = false,
+		Text = "", AutoButtonColor = false,
 		Position = UDim2.fromOffset(32, btnY), Size = UDim2.new(1, -64, 0, BTN_H),
-		BackgroundColor3 = C.off, BorderSizePixel = 0,
-		TextColor3 = C.text, TextSize = 25, FontFace = R.fontB,
+		BackgroundColor3 = C.off, BackgroundTransparency = R.bg and 0.2 or 0,
+		BorderSizePixel = 0,
 	}, self.frame)
-	corner(btn, 10)
+	corner(btn, RADIUS)
 	stroke(btn, C.stroke, 1, 0.4)
 
+	-- mesmo png de fundo dos cards
+	local img = imageBackground(btn, RADIUS, S.CardImageTransparency, S.CardImageTint, 1)
+
+	-- conteúdo (ícone + texto) centralizado, acima da imagem
+	local group = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(0, BTN_H), AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1, ZIndex = 3,
+	}, btn)
+	make("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 10),
+	}, group)
+	if btnIcon then
+		local ic = makeIcon(group, btnIcon, 0, 0, 28, 28, C.text, true)
+		ic.obj.ZIndex = 3
+		ic.obj.LayoutOrder = 1
+	end
+	local txt = make("TextLabel", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(0, BTN_H), AutomaticSize = Enum.AutomaticSize.X,
+		Text = opts.ButtonText or opts.Name or "Button",
+		TextSize = 25, TextColor3 = C.text, FontFace = R.fontB,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		LayoutOrder = 2, ZIndex = 3,
+	}, group)
+
 	local hover = Color3.fromRGB(72, 66, 60)
+	local imgBase = S.CardImageTransparency
 	btn.MouseEnter:Connect(function()
 		TweenService:Create(btn, TweenInfo.new(0.12), { BackgroundColor3 = hover }):Play()
+		if img then TweenService:Create(img, TweenInfo.new(0.12), { ImageTransparency = math.max(0, imgBase - 0.15) }):Play() end
 	end)
 	btn.MouseLeave:Connect(function()
 		TweenService:Create(btn, TweenInfo.new(0.15), { BackgroundColor3 = C.off }):Play()
+		if img then TweenService:Create(img, TweenInfo.new(0.15), { ImageTransparency = imgBase }):Play() end
 	end)
 	btn.MouseButton1Click:Connect(function()
 		btn.BackgroundColor3 = C.accent -- "clique" laranja e volta para a cor dos toggles
-		TweenService:Create(btn, TweenInfo.new(0.25), { BackgroundColor3 = C.off }):Play()
+		btn.BackgroundTransparency = 0
+		TweenService:Create(btn, TweenInfo.new(0.25), {
+			BackgroundColor3 = C.off, BackgroundTransparency = R.bg and 0.2 or 0,
+		}):Play()
 		fire(opts.Callback)
 	end)
-	return { Button = btn }
+
+	return { Button = btn, Text = txt }
 end
 
 ----------------------------------------------------------------
