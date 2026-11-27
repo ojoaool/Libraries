@@ -275,6 +275,7 @@ local TextIcons = {
 }
 
 local IconAssets = {
+	["goal_planner"] = "rbxassetid://135510681556282",
 	["10k"] = "rbxassetid://6026643035",
 	["10mp"] = "rbxassetid://6031328149",
 	["11mp"] = "rbxassetid://6031328141",
