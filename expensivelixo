@@ -275,6 +275,10 @@ local TextIcons = {
 }
 
 local IconAssets = {
+	["claims"] = "rbxassetid//72015400522253",
+	["progressive"] = "rbxassetid//96207481431341",
+	["auto_summon"] = "rbxassetid//135035530817085",
+	["playback"] = "rbxassetid//80720479982374",
 	["goal_planner"] = "rbxassetid://135510681556282",
 	["10k"] = "rbxassetid://6026643035",
 	["10mp"] = "rbxassetid://6031328149",
