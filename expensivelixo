@@ -3324,7 +3324,7 @@ end
 	logoIcon.AnchorPoint = Vector2.new(0.5, 0.5)
 	logoIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
 	logoIcon.Size = UDim2.new(0, math.floor(26 * SC), 0, math.floor(26 * SC))
-	logoIcon.Image = getIconAsset("flare") or "rbxassetid://72226288561084"
+	logoIcon.Image = "rbxassetid://72226288561084"
 	logoIcon.ImageColor3 = C.Accent
 	logoIcon.ScaleType = Enum.ScaleType.Fit
 	logoIcon.ZIndex = 32
